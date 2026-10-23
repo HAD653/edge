@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart' show FlutterError;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:openstrap_edge/compute/profile.dart';
+import 'package:openstrap_edge/data/day_label.dart';
+import 'package:openstrap_edge/data/local_repository.dart';
 import 'package:openstrap_edge/state/derive_coordinator.dart';
 
 void main() {
@@ -31,13 +33,16 @@ void main() {
     bool Function()? disposed,
     bool healthSync = false,
     Future<int> Function()? runHealthExport,
+    bool Function()? optimizeWhoop5,
+    Future<void> Function()? refreshComputeFreshness,
+    LocalRepository? repo,
   }) =>
       DeriveCoordinator(
         // Every test installs a debug hook for the engine calls, so any real
         // engine access is a laziness regression.
         derive: () => throw StateError('derive should stay lazy'),
         profile: () => const Profile(),
-        repo: () => null,
+        repo: () => repo,
         background: background ?? () => false,
         disposed: disposed ?? () => false,
         log: logs.add,
@@ -53,6 +58,8 @@ void main() {
         telemetryConsent: () => false,
         healthShareConsent: () => false,
         maybeReclaimDiskSpace: () async => reclaims++,
+        optimizeWhoop5: optimizeWhoop5,
+        refreshComputeFreshness: refreshComputeFreshness,
       );
 
   test('constructing the coordinator and its scheduler never touches derive',
@@ -175,6 +182,253 @@ void main() {
     // Days 1, 3, 6 and 7, then the end-of-pass notification.
     expect(notifiedAfter, [1, 3, 6, 7]);
     expect(notifies, 5);
+  });
+
+  group('WHOOP 5 publication', () {
+    test(
+      'publishes today after freshness, before the remaining backlog',
+      () async {
+        final freshness = Completer<void>();
+        final backlog = Completer<void>();
+        final coordinator = make(
+          optimizeWhoop5: () => true,
+          refreshComputeFreshness: () => freshness.future,
+        );
+        addTearDown(coordinator.dispose);
+        coordinator.debugDeriveRun =
+            (profile, {heavy = false, onDayDone}) async {
+              onDayDone!(todayLabel(), 1, 2);
+              await backlog.future;
+              return 2;
+            };
+        coordinator.debugRescanRecent = (_) async => 0;
+
+        final pass = coordinator.afterDrain(heavy: true);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          coordinator.insightsRevision.value,
+          0,
+          reason: 'freshness must validate the persisted night first',
+        );
+        freshness.complete();
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          coordinator.insightsRevision.value,
+          1,
+          reason: 'Home can load while older days are still computing',
+        );
+        expect(logs.any((l) => l.contains('WHOOP 5 day')), isTrue);
+
+        backlog.complete();
+        await pass;
+        expect(coordinator.insightsRevision.value, 2);
+      },
+    );
+
+    test(
+      'refreshes early at most twice, then stamps final freshness',
+      () async {
+        var refreshes = 0;
+        var active = 0;
+        var maxActive = 0;
+        final refreshed = Completer<void>();
+        final coordinator = make(
+          optimizeWhoop5: () => true,
+          refreshComputeFreshness: () async {
+            refreshes++;
+            active++;
+            if (active > maxActive) maxActive = active;
+            await Future<void>.delayed(Duration.zero);
+            active--;
+            if (refreshes == 2) refreshed.complete();
+          },
+        );
+        addTearDown(coordinator.dispose);
+        coordinator.debugDeriveRun =
+            (profile, {heavy = false, onDayDone}) async {
+              for (var i = 1; i <= 7; i++) {
+                onDayDone!(i == 2 ? todayLabel() : 'older$i', i, 7);
+              }
+              await refreshed.future;
+              return 7;
+            };
+
+        await coordinator.afterDrain();
+        expect(refreshes, 3);
+        expect(maxActive, 1, reason: 'the freshness reads must not race');
+        expect(coordinator.insightsRevision.value, 3);
+      },
+    );
+
+    for (final finishesBeforeReturn in [false, true]) {
+      test(
+        'an early snapshot cannot overwrite final freshness '
+        '(finishes before engine returns: $finishesBeforeReturn)',
+        () async {
+          final earlyRead = Completer<void>();
+          var durable = 'first day';
+          var freshness = 'before sync';
+          var reads = 0;
+          final coordinator = make(
+            optimizeWhoop5: () => true,
+            refreshComputeFreshness: () async {
+              reads++;
+              final snapshot = durable;
+              if (reads == 1) await earlyRead.future;
+              freshness = snapshot;
+            },
+          );
+          addTearDown(coordinator.dispose);
+          coordinator.debugDeriveRun =
+              (profile, {heavy = false, onDayDone}) async {
+                onDayDone!(todayLabel(), 1, 2);
+                await Future<void>.delayed(Duration.zero);
+                durable = 'all days';
+                // The real engine stamps its final freshness before returning.
+                freshness = durable;
+                if (finishesBeforeReturn) {
+                  earlyRead.complete();
+                  await Future<void>.delayed(Duration.zero);
+                  expect(freshness, 'first day',
+                      reason: 'reproduce the early reader overwriting the stamp');
+                }
+                return 2;
+              };
+          final pass = coordinator.afterDrain();
+          await Future<void>.delayed(Duration.zero);
+          await Future<void>.delayed(Duration.zero);
+          if (!finishesBeforeReturn) {
+            expect(freshness, 'all days');
+            earlyRead.complete();
+          }
+          await pass;
+          expect(reads, 2);
+          expect(freshness, 'all days');
+        },
+      );
+    }
+
+    test(
+      'today finishing first needs one early refresh and the final stamp',
+      () async {
+        var refreshes = 0;
+        final coordinator = make(
+          optimizeWhoop5: () => true,
+          refreshComputeFreshness: () async => refreshes++,
+        );
+        addTearDown(coordinator.dispose);
+        coordinator.debugDeriveRun =
+            (profile, {heavy = false, onDayDone}) async {
+              onDayDone!(todayLabel(), 1, 2);
+              onDayDone('older', 2, 2);
+              return 2;
+            };
+
+        await coordinator.afterDrain();
+        expect(refreshes, 2);
+      },
+    );
+
+    test(
+      'a failed early freshness read still allows the final publication',
+      () async {
+        final coordinator = make(
+          optimizeWhoop5: () => true,
+          refreshComputeFreshness: () async => throw StateError('read failed'),
+        );
+        addTearDown(coordinator.dispose);
+        coordinator.debugDeriveRun =
+            (profile, {heavy = false, onDayDone}) async {
+              onDayDone!(todayLabel(), 1, 1);
+              return 1;
+            };
+
+        await coordinator.afterDrain();
+        expect(coordinator.insightsRevision.value, 1);
+        expect(
+          logs.any((l) => l.contains('early freshness refresh deferred')),
+          isTrue,
+        );
+        expect(logs.any((l) => l.contains('post-drain failed')), isFalse);
+      },
+    );
+
+    test(
+      'publishes before a slow rescore and again only when sessions change',
+      () async {
+        final repo = _SlowRescoreRepo();
+        final coordinator = make(optimizeWhoop5: () => true, repo: repo);
+        addTearDown(coordinator.dispose);
+        coordinator.debugDeriveRun =
+            (profile, {heavy = false, onDayDone}) async => 1;
+        final pass = coordinator.afterDrain();
+        await Future<void>.delayed(Duration.zero);
+        expect(coordinator.insightsRevision.value, 1);
+        repo.result.complete(2);
+        await pass;
+        expect(
+          coordinator.insightsRevision.value,
+          2,
+          reason: 'the corrected workout list needs its own refresh',
+        );
+      },
+    );
+
+    test(
+      'a heavy rescan that changes scalars also advances the revision',
+      () async {
+        final coordinator = make(optimizeWhoop5: () => true);
+        addTearDown(coordinator.dispose);
+        coordinator.debugDeriveRun =
+            (profile, {heavy = false, onDayDone}) async => 0;
+        coordinator.debugRescanRecent = (_) async => 3;
+        await coordinator.afterDrain(heavy: true);
+        expect(coordinator.insightsRevision.value, 2);
+      },
+    );
+
+    test(
+      'disposal during freshness suppresses late UI and follow-up work',
+      () async {
+        final freshness = Completer<void>();
+        final coordinator = make(
+          optimizeWhoop5: () => true,
+          refreshComputeFreshness: () => freshness.future,
+        );
+        coordinator.debugDeriveRun =
+            (profile, {heavy = false, onDayDone}) async {
+              onDayDone!(todayLabel(), 1, 1);
+              return 1;
+            };
+        final pass = coordinator.afterDrain();
+        await Future<void>.delayed(Duration.zero);
+        coordinator.dispose();
+        final notifiesBefore = notifies;
+        freshness.complete();
+        await pass;
+        expect(notifies, notifiesBefore);
+        expect(phoneSteps, 0);
+        expect(recoveryChecks, 0);
+        expect(logs.any((l) => l.contains('post-drain failed')), isFalse);
+      },
+    );
+
+    test('other devices keep their original end-of-pass publication', () async {
+      var refreshes = 0;
+      final coordinator = make(
+        optimizeWhoop5: () => false,
+        refreshComputeFreshness: () async => refreshes++,
+      );
+      addTearDown(coordinator.dispose);
+      coordinator.debugDeriveRun = (profile, {heavy = false, onDayDone}) async {
+        onDayDone!(todayLabel(), 1, 1);
+        expect(coordinator.insightsRevision.value, 0);
+        return 1;
+      };
+      await coordinator.afterDrain();
+      expect(refreshes, 0);
+      expect(coordinator.insightsRevision.value, 1);
+    });
   });
 
   test('health export runs only when enabled and logs its day count',
@@ -325,4 +579,14 @@ void main() {
       expect(() => revision.addListener(() {}), throwsA(isA<FlutterError>()));
     });
   });
+}
+
+class _SlowRescoreRepo extends LocalRepository {
+  final result = Completer<int>();
+
+  @override
+  Future<int> rescoreRecentSessions({int sinceDays = 3}) => result.future;
+
+  @override
+  Future<Map<String, dynamic>> getToday() async => const {};
 }

@@ -300,7 +300,7 @@ void main() {
         sqfliteFfiInit();
         databaseFactory = databaseFactoryFfi;
         await LocalDb.close();
-        LocalDb.dbName = 'whoop_freeze_${family}_test.db';
+        LocalDb.dbName = 'whoop_freeze_${family}_${zone}_test.db';
         final dir = await databaseFactory.getDatabasesPath();
         await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
         await _seedHistory(family);
@@ -325,8 +325,9 @@ void main() {
         }
         // One day per pass, oldest first: each day's baseline must already
         // hold the day before it, whatever the engine's concurrency.
+        final engine = DerivationEngine(optimizeWhoop5: () => family == 'gen5');
         for (final d in _days) {
-          await DerivationEngine().runDays(profile, {_label(d)}, force: true);
+          await engine.runDays(profile, {_label(d)}, force: true);
         }
         // Confirm the detected nap as the review card would and re-derive
         // its day, so the accepted-nap output (naps, nap_min, sleep periods)
@@ -338,8 +339,7 @@ void main() {
                 nowTs: truth.last.day.millisecondsSinceEpoch ~/ 1000 + 86400))
             .singleWhere((s) => s.kind == ActivityKind.nap);
         await store.confirm(nap, startTs: nap.startTs, endTs: nap.endTs);
-        await DerivationEngine()
-            .runDays(profile, {_label(truth[1].day)}, force: true);
+        await engine.runDays(profile, {_label(truth[1].day)}, force: true);
       });
 
       tearDownAll(() async {

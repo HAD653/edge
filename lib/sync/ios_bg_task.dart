@@ -68,10 +68,15 @@ class IosBgTask {
     final ran = await HeadlessSyncGate.tryRun<bool>(
         syncOnly ? 'bg_refresh' : 'bg_task', () async {
       try {
+        var deferredWhoop5 = false;
         // Skip headless BLE if the foreground session already owns the band.
         if (!IosBleRestore.foregroundActive) {
           debugPrint('[ios-bgtask] running headless sync (syncOnly=$syncOnly)');
-          await runHeadlessSync();
+          // Skip WHOOP 5's intermediate light pass. Derive once below, after
+          // runHeadlessSync's finally has also synced the remaining sensors.
+          await runHeadlessSync(deferWhoop5Derivation: () {
+            deferredWhoop5 = true;
+          });
         } else {
           // The foreground app owns the band: no headless BLE (it would fight
           // flutter_blue_plus for the peripheral) — but still use this OS-granted
@@ -84,36 +89,7 @@ class IosBgTask {
             debugPrint('[ios-bgtask] foreground pull failed (ignored): $e');
           }
         }
-        if (!syncOnly) {
-          // Heavy derive pass (full sleep staging + 24h spectra, stale days).
-          try {
-            final profile = await _loadProfile();
-            final engine = DerivationEngine(
-                log: (l) => debugPrint('[ios-bgtask-derive] $l'),
-                background: true);
-            await engine.run(profile, heavy: true);
-            // Baseline-dirty rescan on the iOS BGTask tick: refresh
-            // baseline-dependent scalars on recent finalized days if the
-            // rolling baseline moved. Cheap no-op when unchanged.
-            await engine.rescanRecent(profile);
-            await _refreshWidgetSnapshot(profile);
-          } catch (e) {
-            debugPrint('[ios-bgtask] heavy derive skipped: $e');
-          }
-        } else {
-          // Honest best attempt: run a light derive pass during BGAppRefreshTask.
-          // This keeps today's metrics fresh without tripping the CPU watchdog.
-          try {
-            final profile = await _loadProfile();
-            final engine = DerivationEngine(
-                log: (l) => debugPrint('[ios-bgrefresh-derive] $l'),
-                background: true);
-            await engine.run(profile, heavy: false);
-            await _refreshWidgetSnapshot(profile);
-          } catch (e) {
-            debugPrint('[ios-bgrefresh] light derive skipped: $e');
-          }
-        }
+        await _derive(syncOnly: syncOnly, optimizeWhoop5: deferredWhoop5);
         debugPrint('[ios-bgtask] done (syncOnly=$syncOnly)');
         return true;
       } catch (e) {
@@ -125,6 +101,44 @@ class IosBgTask {
       }
     });
     return ran ?? true; // gate busy → another wake is already doing the work
+  }
+
+  static Future<void> _derive({
+    required bool syncOnly,
+    bool optimizeWhoop5 = false,
+  }) async {
+    if (!syncOnly) {
+      // Heavy derive pass (full sleep staging + 24h spectra, stale days).
+      try {
+        final profile = await _loadProfile();
+        final engine = DerivationEngine(
+          log: (l) => debugPrint('[ios-bgtask-derive] $l'),
+          background: true,
+          optimizeWhoop5: () => optimizeWhoop5,
+        );
+        await engine.run(profile, heavy: true);
+        // Refresh baseline-dependent scalars on recent finalized days if the
+        // rolling baseline moved. Cheap no-op when unchanged.
+        await engine.rescanRecent(profile);
+        await _refreshWidgetSnapshot(profile);
+      } catch (e) {
+        debugPrint('[ios-bgtask] heavy derive skipped: $e');
+      }
+    } else {
+      // A refresh task has the shorter budget: keep this pass light.
+      try {
+        final profile = await _loadProfile();
+        final engine = DerivationEngine(
+          log: (l) => debugPrint('[ios-bgrefresh-derive] $l'),
+          background: true,
+          optimizeWhoop5: () => optimizeWhoop5,
+        );
+        await engine.run(profile, heavy: false);
+        await _refreshWidgetSnapshot(profile);
+      } catch (e) {
+        debugPrint('[ios-bgrefresh] light derive skipped: $e');
+      }
+    }
   }
 
   static Future<Profile> _loadProfile() async {

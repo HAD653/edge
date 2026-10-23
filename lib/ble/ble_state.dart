@@ -1939,6 +1939,86 @@ class WriteChain {
   }
 }
 
+/// Serial diagnostic work with a single replaceable progress snapshot.
+///
+/// A slow sink must not hold up reception or retain one closure per burst.
+/// Only the newest pending progress snapshot is useful; an active write and
+/// every ordinary [add] operation are retained. Adding ordinary work seals
+/// the pending snapshot so a later success cannot move ahead of a failure.
+/// Errors are reported and consumed, including for unawaited progress writes.
+class CoalescingWorkQueue {
+  final void Function(Object error) onError;
+  final List<_CoalescingWork> _pending = [];
+  _CoalescingWork? _latest;
+  bool _running = false;
+
+  CoalescingWorkQueue({required this.onError});
+
+  Future<void> add(Future<void> Function() work) {
+    _latest = null;
+    final item = _CoalescingWork(work, Completer<void>());
+    _pending.add(item);
+    _start();
+    return item.done!.future;
+  }
+
+  void addLatest(Future<void> Function() work) {
+    final latest = _latest;
+    if (latest != null) {
+      latest.work = work;
+      return;
+    }
+    final item = _CoalescingWork(work, null);
+    _latest = item;
+    _pending.add(item);
+    _start();
+  }
+
+  /// Drop only replaceable progress when its link closes. A queued failure
+  /// or other ordinary write must survive teardown.
+  void discardLatest() {
+    final latest = _latest;
+    if (latest != null) _pending.remove(latest);
+    _latest = null;
+  }
+
+  int get pendingCount => _pending.length;
+  bool get isBusy => _running;
+
+  void _start() {
+    if (_running) return;
+    _running = true;
+    unawaited(_drain());
+  }
+
+  Future<void> _drain() async {
+    try {
+      while (_pending.isNotEmpty) {
+        final item = _pending.removeAt(0);
+        if (identical(item, _latest)) _latest = null;
+        try {
+          await item.work();
+        } catch (e) {
+          // Diagnostics, including the error reporter, never break the queue.
+          try {
+            onError(e);
+          } catch (_) {}
+        } finally {
+          item.done?.complete();
+        }
+      }
+    } finally {
+      _running = false;
+    }
+  }
+}
+
+class _CoalescingWork {
+  Future<void> Function() work;
+  final Completer<void>? done;
+  _CoalescingWork(this.work, this.done);
+}
+
 // ── live HR / IMU stream ownership (discussion #287) ─────────────────────────
 //
 // A foreground connection used to be an implicit request for BOTH the

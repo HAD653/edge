@@ -6656,9 +6656,25 @@ class BleEngine {
   /// actually-important step (the commit, the ACK, the link-bounce recovery)
   /// was still queued after it. A diagnostic write failing should never take
   /// the real sync logic down with it.
-  Future<void> _bestEffortLedgerWrite(Future<void> Function() write) async {
+  late final _ledgerWrites = CoalescingWorkQueue(
+    onError: (e) => _log('[SYNC] ledger write failed (non-fatal, continuing): $e'),
+  );
+
+  Future<void> _bestEffortLedgerWrite(Future<void> Function() write) {
+    if (_session?.band.isGen5 == true || _ledgerWrites.isBusy) {
+      return _ledgerWrites.add(() => _writeLedgerSnapshotPart(write));
+    }
+    return _writeLedgerSnapshotPart(write);
+  }
+
+  /// Replace diagnostic storage only; the atomic commit sink is independent.
+  @visibleForTesting
+  Future<void> Function()? debugLedgerWriteHook;
+
+  Future<void> _writeLedgerSnapshotPart(Future<void> Function() write) async {
     try {
-      await write();
+      final hook = debugLedgerWriteHook;
+      await (hook == null ? write() : hook());
     } catch (e) {
       _log('[SYNC] ledger write failed (non-fatal, continuing): $e');
     }
@@ -7509,6 +7525,7 @@ class BleEngine {
         );
         return;
       }
+      final recoveredAck = _chunkFailures.failureCount(tokenHex) > 0;
       _chunkFailures.recordSuccess(tokenHex);
       // A trimmed chunk proves the strap IS draining, so the abort→retry
       // budget is about a stall that has since cleared, not this session.
@@ -7523,43 +7540,70 @@ class BleEngine {
       // over — records were banked and the band may advance.
       _noDurableProgress.trimAcked();
       d.noteBatchAcked(); // ACKed and KEEP listening
-      await _bestEffortLedgerWrite(() => LocalDb.upsertSyncLedgerEntry(
-        status: 'acknowledged',
-        ackedAt: DateTime.now().millisecondsSinceEpoch,
-        metaPatch: {
-          'last_batch_token': tokenHex,
-          'last_batch_id': m.batchId,
-          'last_batch_records': d.records,
-          'last_ack_batches': d.batches,
-          'strap_history_oldest_ts': _strapHistoryOldestTs,
-          'strap_history_newest_ts': _strapHistoryNewestTs,
-          // Which WHOOP generation this batch came from — records/sessions
-          // vary hugely in richness by generation (and, for gen5, by whether
-          // the R22 deep-buffer opt-in was sent), so downstream diagnostics
-          // need this without reaching into the transport layer.
-          'band_generation': state.generation,
-        },
-      ));
-      // Same event, but a REAL per-chunk row keyed by the token — closes out
-      // whatever ack_failed history this token accumulated above.
-      await _bestEffortLedgerWrite(() => LocalDb.upsertSyncLedgerEntry(
-        chunkId: 'batch:$tokenHex',
-        kind: 'historical_batch',
-        status: 'acked',
-        ackedAt: DateTime.now().millisecondsSinceEpoch,
-        metaPatch: {
-          'batch_id': m.batchId,
-          // Cumulative for the connection, not this chunk (kept as it was);
-          // the chunk's own counts and record-time range follow.
-          'records': d.records,
-          if (d.lastChunkStats case final c?) ...{
-            'chunk_rows': c.raws,
-            'chunk_archived': c.archives,
-            'chunk_ts_min': ?c.tsMin,
-            'chunk_ts_max': ?c.tsMax,
+      // Capture before deferring: this controller may have moved to the next
+      // burst, or a replacement link, by the time diagnostics reach SQLite.
+      final ackedAt = DateTime.now().millisecondsSinceEpoch;
+      final batchId = m.batchId;
+      final records = d.records;
+      final batches = d.batches;
+      final oldestTs = _strapHistoryOldestTs;
+      final newestTs = _strapHistoryNewestTs;
+      final generation = state.generation;
+      final chunk = d.lastChunkStats;
+      Future<void> recordAck() async {
+        if (_sessionIsStale(session) || session.closing) return;
+        await _writeLedgerSnapshotPart(() => LocalDb.upsertSyncLedgerEntry(
+          status: 'acknowledged',
+          ackedAt: ackedAt,
+          metaPatch: {
+            'last_batch_token': tokenHex,
+            'last_batch_id': batchId,
+            'last_batch_records': records,
+            'last_ack_batches': batches,
+            'strap_history_oldest_ts': oldestTs,
+            'strap_history_newest_ts': newestTs,
+            // Which WHOOP generation this batch came from — records/sessions
+            // vary hugely in richness by generation (and, for gen5, by whether
+            // the R22 deep-buffer opt-in was sent), so downstream diagnostics
+            // need this without reaching into the transport layer.
+            'band_generation': generation,
           },
-        },
-      ));
+        ));
+        // Same event, but a REAL per-chunk row keyed by the token — closes out
+        // whatever ack_failed history this token accumulated above.
+        if (_sessionIsStale(session) || session.closing) return;
+        await _writeLedgerSnapshotPart(() => LocalDb.upsertSyncLedgerEntry(
+          chunkId: 'batch:$tokenHex',
+          kind: 'historical_batch',
+          status: 'acked',
+          ackedAt: ackedAt,
+          metaPatch: {
+            'batch_id': batchId,
+            // Cumulative for the connection, not this chunk (kept as it was);
+            // the chunk's own counts and record-time range follow.
+            'records': records,
+            if (chunk case final c?) ...{
+              'chunk_rows': c.raws,
+              'chunk_archived': c.archives,
+              'chunk_ts_min': ?c.tsMin,
+              'chunk_ts_max': ?c.tsMax,
+            },
+          },
+        ));
+      }
+      if (session.band.isGen5 && !recoveredAck) {
+        // Success diagnostics need no place on the critical receive path.
+        // Keep one active and the newest pending snapshot; ordinary failure
+        // and completion writes share the queue and preserve their ordering.
+        _ledgerWrites.addLatest(recordAck);
+      } else {
+        // A recovered token closes a real failure row and is never coalesced.
+        if (session.band.isGen5 || _ledgerWrites.isBusy) {
+          await _ledgerWrites.add(recordAck);
+        } else {
+          await recordAck();
+        }
+      }
       _noteStored(); // a banked batch → schedule a (debounced) derive
     } else if (m.sub == SyncMeta.historyComplete) {
       final d = _drain;
@@ -7917,7 +7961,7 @@ class BleEngine {
   /// window backfilled from flash. Stays in `listening` — no mode change.
   Future<void> requestHistorySync() async {
     _historyRequests++;
-    await LocalDb.upsertSyncLedgerEntry(
+    Future<void> recordRequest() => LocalDb.upsertSyncLedgerEntry(
       status: 'requested',
       metaPatch: {
         'request_reason': 'manual',
@@ -7929,6 +7973,11 @@ class BleEngine {
         'strap_history_newest_ts': _strapHistoryNewestTs,
       },
     );
+    if (_session?.band.isGen5 == true || _ledgerWrites.isBusy) {
+      await _bestEffortLedgerWrite(recordRequest);
+    } else {
+      await recordRequest();
+    }
     await _triggerBackfill(BackfillTrigger.manual);
   }
 
@@ -7952,6 +8001,7 @@ class BleEngine {
     final report = await drain.awaitComplete(
       isLinkUp: () => session.connected,
       timeout: timeout,
+      reactive: session.band.isGen5,
     );
     _lastSyncReport = report;
     // Diagnostics only — a ledger failure must not throw out of the wait.
@@ -8967,6 +9017,7 @@ class BleEngine {
     // so a frame either reached the routing below or is dropped, never
     // half-routed.
     session.closing = true;
+    _ledgerWrites.discardLatest();
     for (final sub in session.subs) {
       unawaited(sub.cancel());
     }
@@ -9308,9 +9359,16 @@ class DrainController {
   // including anything that arrived before it started waiting.
   int _reportedRecords = 0;
   int _reportedBatches = 0;
-  DateTime _lastProgressAt = DateTime.now();
+  DateTime _lastProgressAt = clock.now();
   bool _complete = false;
   bool _linkDown = false;
+  final Set<void Function()> _stateWaiters = {};
+
+  void _wakeStateWaiters() {
+    for (final wake in _stateWaiters.toList()) {
+      wake();
+    }
+  }
 
   int get bufferedRecords => _raws.length;
   int get bufferedArchives => _archives.length;
@@ -9338,7 +9396,7 @@ class DrainController {
         LabradorR16Raw.revision,
       );
     }
-    _lastProgressAt = DateTime.now();
+    _lastProgressAt = clock.now();
     _ecgRaw.add(p);
   }
 
@@ -9407,7 +9465,7 @@ class DrainController {
     records++;
     recordsThisOffload++;
     _recordsThisTask++;
-    _lastProgressAt = DateTime.now();
+    _lastProgressAt = clock.now();
     // The tally covers the marker-to-marker window only ([closeBurstTally]) —
     // the record itself is still banked either way.
     if (!_burstTallyClosed) {
@@ -9476,7 +9534,7 @@ class DrainController {
         );
       }
     }
-    _lastProgressAt = DateTime.now();
+    _lastProgressAt = clock.now();
     if (_buffering) {
       _archives.add(a);
     } else {
@@ -9529,7 +9587,8 @@ class DrainController {
   /// current offload complete (for any awaiter) WITHOUT ending the listen.
   void onComplete() {
     _complete = true;
-    _lastProgressAt = DateTime.now();
+    _lastProgressAt = clock.now();
+    _wakeStateWaiters();
   }
 
   /// The engine's task-ending abort boundary fired: this offload is over
@@ -9540,6 +9599,7 @@ class DrainController {
   /// that had already ended.
   void onTaskTerminal() {
     _taskTerminal = true;
+    _wakeStateWaiters();
   }
 
   bool _taskTerminal = false;
@@ -9575,7 +9635,7 @@ class DrainController {
   void rearm() {
     _complete = false;
     _linkDown = false;
-    _lastProgressAt = DateTime.now();
+    _lastProgressAt = clock.now();
     burstStats.reset();
     _burstTallyClosed = false;
   }
@@ -9640,6 +9700,7 @@ class DrainController {
     _taskTerminal = false;
     _taskGeneration++;
     rearm();
+    _wakeStateWaiters();
   }
 
   /// A HISTORY_END closes the burst's wire window: the band computed its
@@ -9650,7 +9711,10 @@ class DrainController {
   void closeBurstTally() => _burstTallyClosed = true;
   bool _burstTallyClosed = false;
 
-  void onLinkDown() => _linkDown = true;
+  void onLinkDown() {
+    _linkDown = true;
+    _wakeStateWaiters();
+  }
 
   /// Per-offload counters reset (after the post-offload policy has read them).
   void resetOffloadCounters() {
@@ -9823,14 +9887,16 @@ class DrainController {
   /// Resolve once the current offload reaches HISTORY_COMPLETE, the task ends
   /// through the abort boundary ([onTaskTerminal]), the link drops, or
   /// [timeout] elapses. Pure waiting — NO abort is ever sent (cutting the offload
-  /// short is exactly what stalled the cursor). Polls the lightweight stop-evaluator
-  /// every second.
+  /// short is exactly what stalled the cursor). WHOOP 5 passes [reactive] so
+  /// completion/abort/link-down resolve on the next microtask instead of waiting
+  /// up to a second for a poll. The poll remains as an idle/timeout safety net.
   Future<SyncReport> awaitComplete({
     required bool Function() isLinkUp,
     Duration timeout = const Duration(seconds: 600),
+    bool reactive = false,
   }) async {
     final evaluator = DrainStopEvaluator(timeout: timeout);
-    final start = DateTime.now();
+    final start = clock.now();
     final waiterGen = _taskGeneration;
     final done = Completer<SyncReport>();
     // The task's progress no waiter has reported yet. A waiter that gave up
@@ -9839,11 +9905,11 @@ class DrainController {
     // and nothing that arrived before or between waits dropped. A claim can
     // land while flush() awaits the commit; the counters then belong to the
     // replacement task, so the superseded task's recorded remainder is used.
-    SyncReport unreported(bool complete) {
+    SyncReport unreported(bool complete, {bool forceIncomplete = false}) {
       if (_taskGeneration != waiterGen) {
         final r = _supersededTaskReport[waiterGen] ?? SyncReport(0, 0, false);
         _supersededTaskReport[waiterGen] = SyncReport(0, 0, r.complete);
-        return r;
+        return forceIncomplete ? SyncReport(r.records, r.batches, false) : r;
       }
       final r = SyncReport(_recordsThisTask - _reportedRecords,
           _batchesThisTask - _reportedBatches, complete);
@@ -9851,59 +9917,80 @@ class DrainController {
       _reportedBatches = _batchesThisTask;
       return r;
     }
-    Timer.periodic(const Duration(seconds: 1), (t) async {
-      if (done.isCompleted) {
-        t.cancel();
-        return;
-      }
-      // Terminal flag, OR this waiter's task was superseded by a new claim
-      // (which resets the flags) before this once-a-second tick got to see
-      // it. Either way the awaited offload is over; a superseded task
-      // reports the outcome it actually reached — a COMPLETE immediately
-      // followed by an auto-continue claim is a SUCCESS, not a failure.
-      if (_taskTerminal || _taskGeneration != waiterGen) {
-        // A superseded waiter reports ITS task's counts, never the
-        // replacement's.
-        final report = unreported(false);
-        final complete = report.complete;
-        t.cancel();
-        // Deliberately NO flush here. A superseded waiter's task is over and
-        // the REPLACEMENT task owns this controller's buffer: a tokenless
-        // commit fired from the stale waiter would snapshot the
-        // replacement's open-burst rows and could overlap its HISTORY_END
-        // token commit — letting the ACK go out before those rows are
-        // durable, which is THE commit-before-ACK violation. The terminal
-        // case needs no flush either: every abort path commits or discards
-        // its buffer before crossing the terminal boundary.
-        log('[SYNC] await stop=${complete ? 'supersededComplete' : 'taskTerminal'}'
-            ' — this offload ended ${complete ? 'complete (a new task claimed '
-            'immediately after HISTORY_COMPLETE)' : 'without completing (abort '
-            'boundary)'}.');
-        done.complete(report);
-        return;
-      }
-      if (!isLinkUp()) _linkDown = true;
-      final stop = evaluator.evaluate(
-        complete: _complete,
-        linkDown: _linkDown,
-        sinceStart: DateTime.now().difference(start),
-      );
-      if (stop == DrainStop.keepGoing) {
-        if (DateTime.now().difference(_lastProgressAt) <
-            const Duration(seconds: 60)) {
+    late final Timer timer;
+    late final void Function() wake;
+    var checking = false;
+    void stopChecking() {
+      timer.cancel();
+      _stateWaiters.remove(wake);
+    }
+    Future<void> check() async {
+      if (done.isCompleted || checking) return;
+      checking = true;
+      try {
+        // Terminal flag, OR this waiter's task was superseded by a new claim
+        // (which resets the flags) before this once-a-second tick got to see
+        // it. Either way the awaited offload is over; a superseded task
+        // reports the outcome it actually reached — a COMPLETE immediately
+        // followed by an auto-continue claim is a SUCCESS, not a failure.
+        if (_taskTerminal || _taskGeneration != waiterGen) {
+          // A superseded waiter reports ITS task's counts, never the
+          // replacement's.
+          final report = unreported(false);
+          final complete = report.complete;
+          stopChecking();
+          // Deliberately NO flush here. A superseded waiter's task is over and
+          // the REPLACEMENT task owns this controller's buffer: a tokenless
+          // commit fired from the stale waiter would snapshot the
+          // replacement's open-burst rows and could overlap its HISTORY_END
+          // token commit — letting the ACK go out before those rows are
+          // durable, which is THE commit-before-ACK violation. The terminal
+          // case needs no flush either: every abort path commits or discards
+          // its buffer before crossing the terminal boundary.
+          log('[SYNC] await stop=${complete ? 'supersededComplete' : 'taskTerminal'}'
+              ' — this offload ended ${complete ? 'complete (a new task claimed '
+              'immediately after HISTORY_COMPLETE)' : 'without completing (abort '
+              'boundary)'}.');
+          done.complete(report);
           return;
         }
-        t.cancel();
-        await flush();
-        log('[SYNC] idle timeout — no offload progress for 60s.');
-        done.complete(unreported(false));
-        return;
+        if (!isLinkUp()) _linkDown = true;
+        final stop = evaluator.evaluate(
+          complete: _complete,
+          linkDown: _linkDown,
+          sinceStart: clock.now().difference(start),
+        );
+        if (stop == DrainStop.keepGoing) {
+          if (clock.now().difference(_lastProgressAt) <
+              const Duration(seconds: 60)) {
+            return;
+          }
+          stopChecking();
+          await flush();
+          log('[SYNC] idle timeout — no offload progress for 60s.');
+          done.complete(unreported(false));
+          return;
+        }
+        stopChecking();
+        final durable = await flush();
+        log('[SYNC] await stop=$stop.');
+        // WHOOP 5 must not report success while a failed final commit still
+        // owns buffered rows. Even if a new task claimed the controller during
+        // that commit, the failed flush belongs to this waiter's task.
+        done.complete(unreported(
+          stop == DrainStop.complete && (!reactive || durable),
+          forceIncomplete: reactive && !durable,
+        ));
+      } finally {
+        checking = false;
       }
-      t.cancel();
-      await flush();
-      log('[SYNC] await stop=$stop.');
-      done.complete(unreported(stop == DrainStop.complete));
-    });
+    }
+    wake = () => scheduleMicrotask(() => unawaited(check()));
+    timer = Timer.periodic(const Duration(seconds: 1), (_) => unawaited(check()));
+    if (reactive) {
+      _stateWaiters.add(wake);
+      wake(); // already complete / disconnected needs no first timer tick
+    }
     return done.future;
   }
 }

@@ -8369,6 +8369,7 @@ class LocalDb {
     required int toRecTs,
     int? afterRecTs,
     int? afterCounter,
+    bool seekFromCursor = false,
   }) async {
     final db = await instance;
     if (afterRecTs == null || afterCounter == null) {
@@ -8392,7 +8393,19 @@ class LocalDb {
       'WHERE rec_ts >= ? AND rec_ts <= ? AND ${derivableSourceSql()} '
       'AND (rec_ts > ? OR (rec_ts = ? AND counter > ?)) '
       'ORDER BY rec_ts ASC, counter ASC LIMIT ?',
-      [fromRecTs, toRecTs, afterRecTs, afterRecTs, afterCounter, limit],
+      // The cursor excludes everything before afterRecTs already. Binding the
+      // tighter lower bound lets SQLite SEEK there instead of rescanning the
+      // same growing prefix on every page before applying the OR predicate.
+      // Keep the second comparison: the cursor's own second may hold another
+      // counter/device, and a reboot may reset counters on later seconds.
+      [
+        seekFromCursor && afterRecTs > fromRecTs ? afterRecTs : fromRecTs,
+        toRecTs,
+        afterRecTs,
+        afterRecTs,
+        afterCounter,
+        limit,
+      ],
     );
   }
 
@@ -11450,13 +11463,41 @@ class LocalDb {
 
   static String localDayLabelNow() => todayLabel();
 
-  static Future<void> refreshComputeFreshness() async {
-    final raw = await rawStats();
-    final recent = await recentDayResults(30);
-    final rolling = await baseline('rolling');
-    final cross = await baseline('crossday');
+  /// Refresh Home's honesty gates. [todayOnly] is the WHOOP 5 early-publication
+  /// path: leave capture/cross-day snapshots to the engine's final refresh and
+  /// avoid counting the retained ledger or transferring/expanding its curves.
+  static Future<void> refreshComputeFreshness({bool todayOnly = false}) async {
+    final raw = todayOnly ? const <String, dynamic>{} : await rawStats();
+    final int? latestRawTs;
+    final List<Map<String, dynamic>> recent;
+    if (todayOnly) {
+      final db = await instance;
+      // EXACTLY rawStats.max_rec_ts: every source/device, rec_ts > 0. The
+      // band's filtered edge below answers a different question and must not
+      // replace this read (a peripheral can make today's activity building).
+      latestRawTs = Sqflite.firstIntValue(await db.rawQuery(
+        'SELECT MAX(rec_ts) FROM decoded_onehz WHERE rec_ts > 0',
+      ));
+      recent = await db.rawQuery(
+        'SELECT r.day_id, r.computed_at, r.readiness, '
+        // Only curves are omitted. json_remove preserves the metadata's JSON
+        // types (notably true/null); malformed legacy JSON still reaches the
+        // tolerant decoder below instead of making the SQL read throw.
+        "CASE WHEN typeof(r.payload_json) = 'text' "
+        'AND json_valid(r.payload_json) '
+        "THEN json_remove(r.payload_json, '\$.series', '\$.activity_curve') "
+        'ELSE r.payload_json END AS payload_json '
+        'FROM day_result r $_servedDayJoin '
+        'ORDER BY r.day_id DESC LIMIT ?',
+        [30],
+      );
+    } else {
+      latestRawTs = (raw['max_rec_ts'] as num?)?.toInt();
+      recent = await recentDayResults(30);
+    }
+    final rolling = todayOnly ? null : await baseline('rolling');
+    final cross = todayOnly ? null : await baseline('crossday');
     final today = localDayLabelNow();
-    final latestRawTs = (raw['max_rec_ts'] as num?)?.toInt();
     final todayWake = await wakeDayFeatures(today);
     final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     // The band's edge: a peripheral streaming this morning says nothing about
@@ -11474,9 +11515,20 @@ class LocalDb {
       final dayId = row['day_id']?.toString();
       if (dayId == null || dayId.isEmpty) continue;
       if (dayId == today && todayRow == null) todayRow = row;
-      final decoded =
-          SeriesCodec.decodePayloadJson(row['payload_json']) ??
-          const <String, dynamic>{};
+      Map<String, dynamic> decoded;
+      if (todayOnly) {
+        try {
+          final parsed = jsonDecode(row['payload_json'] as String);
+          decoded = parsed is Map
+              ? parsed.cast<String, dynamic>()
+              : const <String, dynamic>{};
+        } catch (_) {
+          decoded = const <String, dynamic>{};
+        }
+      } else {
+        decoded = SeriesCodec.decodePayloadJson(row['payload_json']) ??
+            const <String, dynamic>{};
+      }
       if (decoded['skipped'] == true) continue;
       // #448: today's night is not today's overnight until the drain has
       // passed its wake. Mid-drain the window closes at the newest record, so
@@ -11550,17 +11602,19 @@ class LocalDb {
     final overnightState = overnightReady
         ? 'ready'
         : (rawReachedToday ? 'building' : 'missing');
-    await putComputeFreshness(
-      'capture',
-      jsonEncode({
-        'latest_raw_rec_ts': latestRawTs,
-        'latest_raw_day': latestRawTs == null
-            ? null
-            : _localDayLabelFromEpoch(latestRawTs),
-        'decoded_onehz': raw['decoded_onehz'],
-        'decoded_rr': raw['decoded_rr'],
-      }),
-    );
+    if (!todayOnly) {
+      await putComputeFreshness(
+        'capture',
+        jsonEncode({
+          'latest_raw_rec_ts': latestRawTs,
+          'latest_raw_day': latestRawTs == null
+              ? null
+              : _localDayLabelFromEpoch(latestRawTs),
+          'decoded_onehz': raw['decoded_onehz'],
+          'decoded_rr': raw['decoded_rr'],
+        }),
+      );
+    }
     await putComputeFreshness(
       'today',
       jsonEncode({
@@ -11581,13 +11635,15 @@ class LocalDb {
             latestOvernightDay != null && latestOvernightDay != today,
       }),
     );
-    await putComputeFreshness(
-      'crossday',
-      jsonEncode({
-        'present': cross != null,
-        'updated_at': rolling?['updated_at'],
-      }),
-    );
+    if (!todayOnly) {
+      await putComputeFreshness(
+        'crossday',
+        jsonEncode({
+          'present': cross != null,
+          'updated_at': rolling?['updated_at'],
+        }),
+      );
+    }
   }
 
   static Future<List<Map<String, dynamic>>> computeJobs({
@@ -11664,7 +11720,9 @@ class LocalDb {
     });
   }
 
-  static Future<Map<String, dynamic>?> takeNextComputeJob() async {
+  static Future<Map<String, dynamic>?> takeNextComputeJob({
+    bool coalesceDeriveLight = false,
+  }) async {
     final db = await instance;
     return db.transaction((txn) async {
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -11677,6 +11735,20 @@ class LocalDb {
       );
       if (rows.isEmpty) return null;
       final row = rows.first;
+      if (coalesceDeriveLight &&
+          row['scope'] == 'derive' &&
+          row['type'] == 'derive_heavy') {
+        // A light can be returned to the queue AFTER a heavy was enqueued
+        // (a capture/workout gate closed while the light was being claimed).
+        // Absorb only work already queued at this heavy's acquisition. Any
+        // request arriving during the pass must retain its own follow-up:
+        // the heavy may have read its substrate before those records landed.
+        await txn.delete(
+          'compute_jobs',
+          where: 'scope = ? AND state = ? AND type = ?',
+          whereArgs: ['derive', 'queued', 'derive_light'],
+        );
+      }
       await txn.update(
         'compute_jobs',
         {

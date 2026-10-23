@@ -516,6 +516,22 @@ class SyncController {
       }
       return;
     }
+    final family = device.generation ?? paired?.generation;
+    if (foreground &&
+        !wasBackground &&
+        _keepAlive &&
+        engine.isConnected &&
+        family == 'gen5') {
+      // UIKit can report another resume without a preceding pause (Control
+      // Center, an accessory picker, startup). The WHOOP 5 link is already
+      // configured: reconnecting to it is a no-op, so the full path below
+      // would poll/configure it again and wait for history nobody requested.
+      // Reuse the normal liveness check and floored pull instead. It also
+      // leaves an existing burst alone without scheduling another heavy derive.
+      unawaited(foregroundCatchUp());
+      _startBackfillTimer();
+      return;
+    }
     BandOwnership.markForegroundIntent(true);
     _log('[OWNERSHIP] foreground intent on (${BandOwnership.debugState})');
     // Coming back after hours (or days) suspended: re-read the phone's steps

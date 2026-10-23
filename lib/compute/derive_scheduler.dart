@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import '../data/db.dart';
 
 enum DeriveJobKind { light, heavy }
@@ -15,6 +17,7 @@ class DeriveScheduler {
     required this.run,
     required this.log,
     required this.onChanged,
+    this.optimizeWhoop5,
     this.lightSettle = const Duration(seconds: 8),
     this.heavySettle = const Duration(seconds: 2),
     this.workoutHoldCap = const Duration(hours: 6),
@@ -23,6 +26,11 @@ class DeriveScheduler {
   final Future<void> Function({required DeriveJobKind kind}) run;
   final void Function(String) log;
   final void Function() onChanged;
+  final bool Function()? optimizeWhoop5;
+
+  /// Capture has already passed the BLE debounce and the offload gate before
+  /// this timer can fire. WHOOP 5 needs only a short coalescing window here.
+  static const whoop5Settle = Duration(milliseconds: 250);
   final Duration lightSettle;
   final Duration heavySettle;
 
@@ -78,7 +86,8 @@ class DeriveScheduler {
   bool _pendingLight = false;
   bool _pendingHeavy = false;
   Timer? _timer;
-  bool _refreshing = false;
+  Future<void>? _snapshotRefresh;
+  bool _snapshotDirty = false;
 
   Future<void> init() async {
     await LocalDb.recoverComputeJobs();
@@ -91,15 +100,21 @@ class DeriveScheduler {
   bool get pendingLight => _pendingLight;
   bool get pendingHeavy => _pendingHeavy;
 
+  @visibleForTesting
+  Future<void> Function()? debugBeforeClaim;
+
+  @visibleForTesting
+  Future<void> Function()? debugAfterSnapshotRead;
+
   Map<String, dynamic> snapshot() => {
-        'offload_active': _offloadActive,
-        'workout_active': _workoutActive,
-        'workout_hold_expired': _workoutHoldExpired,
-        'background': _background,
-        'running': _running,
-        'pending_light': _pendingLight,
-        'pending_heavy': _pendingHeavy,
-      };
+    'offload_active': _offloadActive,
+    'workout_active': _workoutActive,
+    'workout_hold_expired': _workoutHoldExpired,
+    'background': _background,
+    'running': _running,
+    'pending_light': _pendingLight,
+    'pending_heavy': _pendingHeavy,
+  };
 
   void markStoredData() {
     unawaited(_enqueue(type: 'derive_light', reason: 'stored_data'));
@@ -120,8 +135,10 @@ class DeriveScheduler {
       _workoutCapTimer?.cancel();
       _workoutCapTimer = Timer(workoutHoldCap, () {
         _workoutHoldExpired = true;
-        log('[derive-scheduler] workout still live past the hold cap — '
-            'treating it as forgotten; derive may run');
+        log(
+          '[derive-scheduler] workout still live past the hold cap — '
+          'treating it as forgotten; derive may run',
+        );
         onChanged();
         _arm();
       });
@@ -184,17 +201,18 @@ class DeriveScheduler {
     _workoutCapTimer = null;
   }
 
-  Future<void> _enqueue({
-    required String type,
-    required String reason,
-  }) async {
+  Future<void> _enqueue({required String type, required String reason}) async {
     await LocalDb.enqueueDeriveJob(type: type, reason: reason);
     await _refreshSnapshot();
     _arm();
   }
 
   void _arm() {
-    if (_disposed || _running || _offloadActive || _background || _workoutHeld) {
+    if (_disposed ||
+        _running ||
+        _offloadActive ||
+        _background ||
+        _workoutHeld) {
       return;
     }
     if (!_pendingLight && !_pendingHeavy) {
@@ -202,39 +220,56 @@ class DeriveScheduler {
       return;
     }
     _timer?.cancel();
-    _timer = Timer(_pendingHeavy ? heavySettle : lightSettle, () {
-      unawaited(_drain());
+    final settle = optimizeWhoop5?.call() == true
+        ? whoop5Settle
+        : (_pendingHeavy ? heavySettle : lightSettle);
+    _timer = Timer(settle, () {
+      unawaited(
+        _drain().catchError((Object e) {
+          log('[derive-scheduler] drain failed: $e');
+        }),
+      );
     });
     onChanged();
   }
 
   Future<void> _drain() async {
-    if (_running || _offloadActive || _background || _workoutHeld) return;
+    if (_disposed ||
+        _running ||
+        _offloadActive ||
+        _background ||
+        _workoutHeld) {
+      return;
+    }
     _timer?.cancel();
     _timer = null;
-    final job = await LocalDb.takeNextComputeJob();
-    if (job == null) {
-      await _refreshSnapshot();
-      return;
-    }
-    final id = job['id']?.toString();
-    // RE-CHECK THE GATES AFTER ACQUISITION. The checks above happened before a
-    // DB round-trip, and a workout can start (or an offload/background flip can
-    // land) inside it — at which point running the pass is exactly what the
-    // gate exists to prevent. The job is already marked `running` by
-    // takeNextComputeJob, so hand it back rather than leaving it claimed.
-    if (_offloadActive || _background || _workoutHeld) {
-      if (id != null && id.isNotEmpty) {
-        await LocalDb.requeueComputeJob(id);
-      }
-      await _refreshSnapshot();
-      return;
-    }
-    final kind = _parseKind(job['type']?.toString());
+    // Claim the lane BEFORE the DB await: an enqueue/release can otherwise
+    // arm another timer while acquisition is in flight and claim a second job.
     _running = true;
-    await _refreshSnapshot();
-    log('[derive-scheduler] running ${kind == DeriveJobKind.heavy ? "heavy" : "light"} pass');
+    String? id;
     try {
+      await debugBeforeClaim?.call();
+      final job = await LocalDb.takeNextComputeJob(
+        coalesceDeriveLight: optimizeWhoop5?.call() ?? false,
+      );
+      if (job == null) return;
+      id = job['id']?.toString();
+      await _refreshSnapshot();
+      // RE-CHECK THE GATES AFTER ACQUISITION. The checks above happened before a
+      // DB round-trip, and a workout can start (or an offload/background flip can
+      // land) inside it — at which point running the pass is exactly what the
+      // gate exists to prevent. The job is already marked `running` by
+      // takeNextComputeJob, so hand it back rather than leaving it claimed.
+      if (_disposed || _offloadActive || _background || _workoutHeld) {
+        if (id != null && id.isNotEmpty) {
+          await LocalDb.requeueComputeJob(id);
+        }
+        return;
+      }
+      final kind = _parseKind(job['type']?.toString());
+      log(
+        '[derive-scheduler] running ${kind == DeriveJobKind.heavy ? "heavy" : "light"} pass',
+      );
       await run(kind: kind);
       if (id != null && id.isNotEmpty) {
         await LocalDb.completeComputeJob(id);
@@ -248,7 +283,7 @@ class DeriveScheduler {
       _running = false;
       await _refreshSnapshot();
       if (_pendingHeavy || _pendingLight) _arm();
-      onChanged();
+      if (!_disposed) onChanged();
     }
   }
 
@@ -262,22 +297,29 @@ class DeriveScheduler {
     }
   }
 
-  Future<void> _refreshSnapshot() async {
-    if (_refreshing) return;
-    _refreshing = true;
+  Future<void> _refreshSnapshot() {
+    // Share the in-flight read, AND reread if an enqueue landed during it. A
+    // caller must not return early and arm from a stale empty snapshot.
+    _snapshotDirty = true;
+    return _snapshotRefresh ??= _readSnapshot();
+  }
+
+  Future<void> _readSnapshot() async {
     try {
-      final jobs = await LocalDb.computeJobs(state: 'queued', limit: 50);
-      _pendingLight = jobs.any(
-        (job) =>
-            job['type']?.toString() == 'derive_light',
-      );
-      _pendingHeavy = jobs.any(
-        (job) =>
-            job['type']?.toString() == 'derive_heavy',
-      );
+      do {
+        _snapshotDirty = false;
+        final jobs = await LocalDb.computeJobs(state: 'queued', limit: 50);
+        await debugAfterSnapshotRead?.call();
+        _pendingLight = jobs.any(
+          (job) => job['type']?.toString() == 'derive_light',
+        );
+        _pendingHeavy = jobs.any(
+          (job) => job['type']?.toString() == 'derive_heavy',
+        );
+      } while (_snapshotDirty && !_disposed);
     } finally {
-      _refreshing = false;
-      onChanged();
+      _snapshotRefresh = null;
+      if (!_disposed) onChanged();
     }
   }
 }

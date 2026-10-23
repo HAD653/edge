@@ -2911,8 +2911,17 @@ Future<int> debugAgingEdge(String? family, int dataNowSec) =>
     _agingEdgeFor(family, dataNowSec);
 
 class DerivationEngine {
-  DerivationEngine({this.log, this.background = false, this.offloadActive});
+  DerivationEngine({
+    this.log,
+    this.background = false,
+    this.offloadActive,
+    this.optimizeWhoop5,
+  });
   final void Function(String)? log;
+
+  /// Runtime gate supplied by the paired-band owner. Other generations retain
+  /// their existing read path; this changes query work, never derived values.
+  final bool Function()? optimizeWhoop5;
 
   /// True while a band offload is draining. The scheduler never STARTS a
   /// derive during one, but one can start mid-pass; the raw prune checks this
@@ -4270,6 +4279,7 @@ class DerivationEngine {
           toRecTs: toRecTs,
           afterRecTs: afterRecTs,
           afterCounter: afterCursor,
+          seekFromCursor: optimizeWhoop5?.call() ?? false,
         );
         if (decodedRows.isNotEmpty) {
           _trackPrepareBatch(decodedRows.length);

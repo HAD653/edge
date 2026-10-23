@@ -281,6 +281,7 @@ class AppState extends ChangeNotifier {
     log: _log,
     background: _background,
     offloadActive: () => _deriveScheduler.offloadActive,
+    optimizeWhoop5: () => _optimizeWhoop5Sync,
   );
   late final DeriveCoordinator _deriveCoordinator = DeriveCoordinator(
     derive: () => _derive,
@@ -297,8 +298,14 @@ class AppState extends ChangeNotifier {
     telemetryConsent: () => telemetryConsent,
     healthShareConsent: () => healthShareConsent,
     maybeReclaimDiskSpace: _maybeReclaimDiskSpace,
+    optimizeWhoop5: () => _optimizeWhoop5Sync,
   );
   DeriveScheduler get _deriveScheduler => _deriveCoordinator.scheduler;
+
+  // Discovery wins over the pairing hint; the hint also covers queued work
+  // recovered before a disconnected WHOOP 5 has been rediscovered.
+  bool get _optimizeWhoop5Sync =>
+      (engine.state.generation ?? paired?.generation) == 'gen5';
 
   late final LiveStreamController _liveStreamController =
       LiveStreamController(

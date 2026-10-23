@@ -273,7 +273,12 @@ Future<void> rearmHeadlessAlarm(BleEngine engine) async {
 /// throws. Connects-by-id if reachable, drains whatever the band buffered to
 /// flash into local storage (non-destructive cursor — catches up everything since
 /// last time), and disconnects. No network.
-Future<bool> runHeadlessSync({BandLease? lease}) async {
+/// [deferWhoop5Derivation] skips the intermediate light pass for a discovered
+/// WHOOP 5 and tells the BGTask caller to derive after all sensor inputs land.
+Future<bool> runHeadlessSync({
+  BandLease? lease,
+  void Function()? deferWhoop5Derivation,
+}) async {
   WidgetsFlutterBinding.ensureInitialized();
   final ownedLease = lease ?? BandOwnership.tryAcquireHeadless();
   if (ownedLease == null) {
@@ -335,18 +340,15 @@ Future<bool> runHeadlessSync({BandLease? lease}) async {
       await disconnectHeadless(engine);
     }
     // Within the SAME background wake slot: capture raw AND derive the fresh
-    // window (bounded LIGHT pass — newest affected day only — so we stay inside
-    // the short iOS execution budget). Best-effort; if the slot ends first, the
-    // light pass on the next drain or the foreground finalize catches up.
-    try {
-      await DerivationEngine(
-        log: (l) => debugPrint('[bgsync-derive] $l'),
-        background: true,
-      ).run(await loadHeadlessProfile());
-    } catch (e) {
-      debugPrint('[bgsync] derive skipped: $e');
-    }
-    debugPrint('[bgsync] done (local drain + light derive).');
+    // window (a bounded LIGHT pass by default). A WHOOP 5 BGTask defers this
+    // until the remaining sensors in finally have also landed, then derives
+    // once over every source. If the slot ends first, the next drain or
+    // foreground finalize catches up.
+    await deriveAfterHeadlessDrain(
+      engine,
+      deferWhoop5Derivation: deferWhoop5Derivation,
+    );
+    debugPrint('[bgsync] done (local drain).');
     await checkSyncStaleness();
     return true;
   } catch (e) {
@@ -427,6 +429,34 @@ Future<bool> runHeadlessSync({BandLease? lease}) async {
         debugPrint('[bgsync] ${link.entry.id} sync skipped: $e');
       }
     }
+  }
+}
+
+/// BGTask already derives and publishes the widget after its drain. For a
+/// WHOOP 5, skip the intermediate light pass and let that caller derive once
+/// after every sensor has synced. The synchronous callback only records this
+/// deferral; it must not derive or publish a widget before those inputs land.
+/// Other wake sources and the established WHOOP 4 path keep their light pass.
+Future<void> deriveAfterHeadlessDrain(
+  BleEngine engine, {
+  void Function()? deferWhoop5Derivation,
+  Future<void> Function()? derive,
+}) async {
+  try {
+    if (engine.linkDeviceFamily == 'gen5' && deferWhoop5Derivation != null) {
+      deferWhoop5Derivation();
+      return;
+    }
+    await (derive ??
+        () async {
+          await DerivationEngine(
+            log: (l) => debugPrint('[bgsync-derive] $l'),
+            background: true,
+            optimizeWhoop5: () => engine.linkDeviceFamily == 'gen5',
+          ).run(await loadHeadlessProfile());
+        })();
+  } catch (e) {
+    debugPrint('[bgsync] derive skipped: $e');
   }
 }
 

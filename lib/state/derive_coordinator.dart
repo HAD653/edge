@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import '../compute/derivation_engine.dart';
 import '../compute/derive_scheduler.dart';
 import '../compute/profile.dart';
+import '../data/day_label.dart';
+import '../data/db.dart';
 import '../data/local_repository.dart';
 import '../telemetry/health_uploader.dart';
 import '../telemetry/telemetry_service.dart';
@@ -34,20 +36,26 @@ class DeriveCoordinator {
     required bool Function() telemetryConsent,
     required bool Function() healthShareConsent,
     required Future<void> Function() maybeReclaimDiskSpace,
-  })  : _derive = derive,
-        _profile = profile,
-        _repo = repo,
-        _background = background,
-        _hostDisposed = disposed,
-        _log = log,
-        _notify = notify,
-        _refreshPhoneStepsToday = refreshPhoneStepsToday,
-        _maybeNotifyRecoveryReady = maybeNotifyRecoveryReady,
-        _runHealthExport = runHealthExport,
-        _healthSyncEnabled = healthSyncEnabled,
-        _telemetryConsent = telemetryConsent,
-        _healthShareConsent = healthShareConsent,
-        _maybeReclaimDiskSpace = maybeReclaimDiskSpace;
+    bool Function()? optimizeWhoop5,
+    Future<void> Function()? refreshComputeFreshness,
+  }) : _derive = derive,
+       _profile = profile,
+       _repo = repo,
+       _background = background,
+       _hostDisposed = disposed,
+       _log = log,
+       _notify = notify,
+       _refreshPhoneStepsToday = refreshPhoneStepsToday,
+       _maybeNotifyRecoveryReady = maybeNotifyRecoveryReady,
+       _runHealthExport = runHealthExport,
+       _healthSyncEnabled = healthSyncEnabled,
+       _telemetryConsent = telemetryConsent,
+       _healthShareConsent = healthShareConsent,
+       _maybeReclaimDiskSpace = maybeReclaimDiskSpace,
+       _optimizeWhoop5 = optimizeWhoop5 ?? (() => false),
+       _refreshComputeFreshness =
+           refreshComputeFreshness ??
+           (() => LocalDb.refreshComputeFreshness(todayOnly: true));
 
   final DerivationEngine Function() _derive;
   final Profile Function() _profile;
@@ -63,6 +71,8 @@ class DeriveCoordinator {
   final bool Function() _telemetryConsent;
   final bool Function() _healthShareConsent;
   final Future<void> Function() _maybeReclaimDiskSpace;
+  final bool Function() _optimizeWhoop5;
+  final Future<void> Function() _refreshComputeFreshness;
 
   bool _closed = false;
   bool get _disposed => _closed || _hostDisposed();
@@ -72,6 +82,7 @@ class DeriveCoordinator {
         afterDrain(heavy: kind == DeriveJobKind.heavy),
     log: _log,
     onChanged: _notify,
+    optimizeWhoop5: _optimizeWhoop5,
   );
 
   /// Bumped whenever stored insights change so listeners can re-query without a
@@ -91,7 +102,14 @@ class DeriveCoordinator {
   /// sweep. Best-effort + non-blocking — never throws into the BLE path.
   /// Refreshes the UI when results land so screens re-read the fresh derived rows.
   Future<void> afterDrain({bool heavy = false}) async {
+    if (_disposed) return;
     final mode = heavy ? 'heavy' : 'light';
+    final fastPublication = _optimizeWhoop5();
+    final started = Stopwatch()..start();
+    Future<void>? earlyPublication;
+    var firstPublicationQueued = false;
+    var todayPublicationQueued = false;
+    final today = todayLabel();
     try {
       // Context for whatever crash/ANR report comes next — the derivation
       // engine's heavy per-day compute is isolate-offloaded, but the
@@ -107,14 +125,62 @@ class DeriveCoordinator {
         return run(
           _profile(),
           heavy: heavy,
-          onDayDone: (day, index, total) async {
+          onDayDone: (day, index, total) {
+            if (_disposed) return;
+            // Screens subscribe to insightsRevision, not these status ticks.
+            // Publish the first persisted result and today's result (if a
+            // parallel worker finished an older day first) while the remaining
+            // backlog computes. Refresh the existing honesty/freshness gates
+            // first: a partial night must still stay provisional. At most two
+            // early refreshes, serialized without holding up the workers.
+            if (fastPublication &&
+                (!firstPublicationQueued ||
+                    (day == today && !todayPublicationQueued))) {
+              firstPublicationQueued = true;
+              if (day == today) todayPublicationQueued = true;
+              earlyPublication = (earlyPublication ?? Future<void>.value())
+                  .then((_) async {
+                    try {
+                      if (_disposed) return;
+                      await _refreshComputeFreshness();
+                      if (_disposed) return;
+                      bumpInsights();
+                      _notify();
+                      _log(
+                        '[derive] WHOOP 5 day $day available after '
+                        '${started.elapsedMilliseconds}ms ($mode)',
+                      );
+                    } catch (e) {
+                      _log('[derive] early freshness refresh deferred: $e');
+                    }
+                  });
+            }
             if (index == total || index == 1 || index % 3 == 0) {
               _notify();
             }
           },
         );
       });
+      await earlyPublication;
+      if (_disposed) return;
+      // The engine also stamps freshness at the end of its run. An early read
+      // may finish after that stamp, even before run() itself returns. Always
+      // restore the final snapshot after joining our early publications.
+      if (earlyPublication != null) {
+        try {
+          await _refreshComputeFreshness();
+        } catch (e) {
+          _log('[derive] final freshness refresh deferred: $e');
+        }
+        if (_disposed) return;
+      }
       TelemetryService.instance.breadcrumb('derive: $mode done');
+      // Today's compute is complete. A slow workout rescore must not keep
+      // WHOOP 5 users looking at the pre-sync Home snapshot.
+      if (fastPublication) {
+        bumpInsights();
+        _notify();
+      }
       // A drain can bank band coverage and a day can have rolled over since the
       // last read — both change which source owns today's steps.
       unawaited(_refreshPhoneStepsToday());
@@ -124,16 +190,20 @@ class DeriveCoordinator {
       // recent sessions against the substrate now that it is here, so the
       // workout LIST is corrected too and not just a detail screen someone
       // happens to open. Monotone and idempotent — see reconcileSessionScore.
+      var fixed = 0;
       try {
-        final fixed = await _repo()?.rescoreRecentSessions() ?? 0;
+        fixed = await _repo()?.rescoreRecentSessions() ?? 0;
         if (fixed > 0) {
           _log('[derive] rescored $fixed session(s) from substrate');
         }
       } catch (e) {
         _log('[derive] session rescore failed: $e');
       }
-      bumpInsights();
-      _notify(); // screens re-fetch from the derived store
+      if (_disposed) return;
+      if (!fastPublication || fixed > 0) {
+        bumpInsights();
+        _notify(); // screens re-fetch from the derived store
+      }
       // Same signal, for the surfaces that can't listen: home/lock-screen
       // widget, Watch mirror, Siri intents (WidgetService.refresh).
       unawaited(WidgetService.refresh(_repo()));
@@ -153,6 +223,8 @@ class DeriveCoordinator {
           final n = await (debugRescanRecent?.call(_profile()) ??
               _derive().rescanRecent(_profile()));
           if (n > 0) {
+            if (_disposed) return;
+            if (fastPublication) bumpInsights();
             _notify(); // screens re-read the refreshed scalars
           }
         } catch (e) {
@@ -188,6 +260,10 @@ class DeriveCoordinator {
       // fatal: the app keeps running, but this is worth knowing about.
       TelemetryService.instance.recordNonFatal(e, st, reason: 'post_drain_failed');
     } finally {
+      // Do not leave a delayed freshness read publishing after the scheduler
+      // released a failed pass to its next job.
+      await earlyPublication;
+      started.stop();
       TelemetryService.instance.setContext('derive_active', false);
     }
   }
