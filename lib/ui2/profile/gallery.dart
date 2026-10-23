@@ -59,6 +59,7 @@ import '../onboarding/welcome.dart' show ImportOutcome, ImportReport;
 // barrel test), so their components are imported by path.
 import '../screens/screens.dart';
 import '../ui2.dart';
+import '../demo/demo_screen.dart' show DemoBanner;
 import 'devices.dart';
 import 'profile.dart';
 import 'wearable_numbers.dart';
@@ -159,6 +160,7 @@ Map<String, Widget> componentCases() => {
       // swept: they are the two components a regression would be noticed in
       // last and cost the most.
       'rings': const RingTrio(d: _ringsMeasured),
+      'demo_banner': const DemoBanner(),
       // The two states that decide whether the trio is honest, in one picture:
       // recovery still filling its baseline (progress, not a bad score), and a
       // real duration with no computed need to draw it against.

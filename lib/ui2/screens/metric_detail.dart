@@ -10,6 +10,7 @@
 // the old UI ended up with forty different opinions about what a chart is.
 
 import '../../l10n/display_text.dart';
+import '../../l10n/date_text.dart' show localizedDate;
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -122,7 +123,7 @@ const _specs = <String, MetricSpec>{
     chartKey: 'hrv',
     title: 'HRV',
     unit: 'ms',
-    color: C.green,
+    color: C.sleep,
     icon: LucideIcons.activity,
     method: 'The mean of RMSSD across every 5-minute window of the detected '
         'sleep session that holds at least 20 clean successive differences. '
@@ -685,7 +686,12 @@ bool _labelSources(MetricData d) {
 class MetricDetail extends StatefulWidget {
   final String metricKey;
   final MetricData? data;
-  const MetricDetail(this.metricKey, {super.key, this.data});
+
+  /// Explore an injected snapshot without live drill-downs or profile edits.
+  final bool readOnly;
+  const MetricDetail(this.metricKey, {super.key, this.data,
+    this.readOnly = false,
+  }) : assert(!readOnly || data != null);
 
   @override
   State<MetricDetail> createState() => _MetricDetailState();
@@ -822,6 +828,7 @@ class _MetricDetailState extends State<MetricDetail> {
   }
 
   Future<void> _load() async {
+    if (widget.readOnly) return;
     // FIRST LINE, because the line under it reads `context` unconditionally.
     // Both callers can land after disposal: the post-frame callback fires
     // whether or not the element survived the frame, and `_prefer` awaits a
@@ -874,6 +881,52 @@ class _MetricDetailState extends State<MetricDetail> {
     }
   }
 
+  Widget _metricSelector(BuildContext c, MetricSpec spec) {
+    final p = P.of(c);
+    return Surface(
+      color: p.card2,
+      pad: const EdgeInsets.symmetric(horizontal: S.x4, vertical: S.x3),
+      onTap: widget.readOnly ? null : () async {
+        final selected = await showModalBottomSheet<String>(
+          context: c,
+          backgroundColor: p.card,
+          isScrollControlled: true,
+          builder: (sheet) => SafeArea(child: SizedBox(
+            height: MediaQuery.sizeOf(sheet).height * .7,
+            child: ListView(padding: const EdgeInsets.all(S.x4), children: [
+              for (final item in _specs.entries)
+                Pressable(
+                  onTap: () => Navigator.of(sheet).pop(item.key),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: S.x3),
+                    child: Row(children: [
+                      Icon(item.value.icon, size: 18,
+                          color: p.on(item.value.color)),
+                      const SizedBox(width: S.x3),
+                      Expanded(child: Text(uiText(c, item.value.title),
+                          style: F.body.copyWith(color: p.ink))),
+                      if (item.key == widget.metricKey)
+                        Icon(LucideIcons.check, size: 18, color: p.ink),
+                    ]),
+                  ),
+                ),
+            ]),
+          )),
+        );
+        if (!mounted || selected == null || selected == widget.metricKey) return;
+        go(context, MetricDetail(selected));
+      },
+      child: Row(children: [
+        Icon(spec.icon, size: 19, color: p.ink3),
+        const SizedBox(width: S.x3),
+        Expanded(child: Text(uiText(c, spec.title).toUpperCase(),
+            style: F.over.copyWith(color: p.ink, letterSpacing: 1.1))),
+        if (!widget.readOnly)
+          Icon(LucideIcons.chevronDown, size: 20, color: p.ink),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext c) {
     final l = AppLocalizations.of(c);
@@ -888,7 +941,9 @@ class _MetricDetailState extends State<MetricDetail> {
     final series = denseDays(all, win);
     final vals = [for (final v in series) ?v];
 
-    return detailScaffold(c, uiText(context, spec.title), [
+    return detailScaffold(c, l?.healthTabTrends ?? 'Trends', [
+      _metricSelector(c, spec),
+      const SizedBox(height: S.x5),
       // Resting heart rate is the NIGHT's number; this is what the chest is
       // doing this second. Two different quantities, so the live one gets its
       // own card above the trend rather than a second figure on the same card,
@@ -910,7 +965,8 @@ class _MetricDetailState extends State<MetricDetail> {
           icon: spec.icon,
         ),
         const SizedBox(height: S.x5),
-        investigateRow(c, () => go(c, Investigate(widget.metricKey))),
+        if (!widget.readOnly)
+          investigateRow(c, () => go(c, Investigate(widget.metricKey))),
       ] else if (vals.isEmpty) ...[
         _ranges(c, d, spec.color),
         const SizedBox(height: S.x5),
@@ -951,12 +1007,14 @@ class _MetricDetailState extends State<MetricDetail> {
         // placeholder `MetricData()` and `d.stepGoal` is just the fallback
         // default, not this user's goal — showing the editor pre-filled with
         // that would risk saving it over their real one.
-        if (!_loading && widget.metricKey == 'steps' && win == 1) ...[
+        if (!widget.readOnly &&
+            !_loading && widget.metricKey == 'steps' && win == 1) ...[
           const SizedBox(height: S.x5),
           _StepGoalGauge(
               steps: null, goal: d.stepGoal, color: spec.color, onSaved: _load),
         ],
         const SizedBox(height: S.x5),
+        if (!widget.readOnly)
         investigateRow(c, () => go(c, Investigate(widget.metricKey))),
       ] else ...[
         _ranges(c, d, spec.color),
@@ -965,7 +1023,7 @@ class _MetricDetailState extends State<MetricDetail> {
         // Today's count against the goal set on this screen's own edit
         // affordance — a trend average has no goal to be measured against, so
         // this stays win == 1 only, same gate as the Breakdown link below.
-        if (widget.metricKey == 'steps' && win == 1) ...[
+        if (!widget.readOnly && widget.metricKey == 'steps' && win == 1) ...[
           const SizedBox(height: S.x5),
           _StepGoalGauge(
               steps: vals.last,
@@ -992,7 +1050,7 @@ class _MetricDetailState extends State<MetricDetail> {
         // HRV's own substrate (the Poincaré cloud, the night's curve,
         // deceleration capacity) is research detail, so this is the same door
         // to the Advanced screen that Health has, not a fourth card here.
-        if (widget.metricKey == 'hrv') ...[
+        if (!widget.readOnly && widget.metricKey == 'hrv') ...[
           detailLinkRow(
               c,
               LucideIcons.heartPulse,
@@ -1012,7 +1070,7 @@ class _MetricDetailState extends State<MetricDetail> {
         // "Where today's came from" was the old name: accurate about the
         // content, and it read as a phrase rather than a place. A doorway
         // wants the plainest noun that is still true.
-        if (widget.metricKey == 'steps' && win == 1) ...[
+        if (!widget.readOnly && widget.metricKey == 'steps' && win == 1) ...[
           detailLinkRow(
               c,
               LucideIcons.footprints,
@@ -1022,7 +1080,8 @@ class _MetricDetailState extends State<MetricDetail> {
               () => go(c, const DayStepsDetail())),
           const SizedBox(height: S.x3),
         ],
-        investigateRow(c, () => go(c, Investigate(widget.metricKey))),
+        if (!widget.readOnly)
+          investigateRow(c, () => go(c, Investigate(widget.metricKey))),
       ],
     ]);
   }
@@ -1121,7 +1180,7 @@ class _MetricDetailState extends State<MetricDetail> {
       l?.metricDetailPreferX(o.label) ?? 'Prefer ${o.label}';
 
   Future<void> _prefer(DeviceOption o) async {
-    if (_d == null || !mounted) return;
+    if (widget.readOnly || _d == null || !mounted) return;
     final spec = specOf(widget.metricKey);
     // PER SIGNAL, never per metric. "Priority for readiness" has no meaning —
     // readiness has four inputs (final-plan §4.5). A per-metric control is
@@ -1203,32 +1262,27 @@ class _MetricDetailState extends State<MetricDetail> {
     final diff = band == null ? 0.0 : latest - band.usual;
 
     return Surface(
+      color: p.bg,
+      elevation: 0,
+      pad: const EdgeInsets.symmetric(vertical: S.x2),
       child: Column(children: [
-        Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(_fmt(spec, mean), style: F.n48.copyWith(color: p.ink)),
-              const SizedBox(width: S.x2),
-              // NOT `spec.unit`. `metricValue('min', 443)` is already "7h 23m",
-              // so every min-unit metric — Time asleep, Deep, REM, Wear time —
-              // rendered its headline as "7h 23m min".
-              Text(
-                uiText(context, unitBeside(spec.unit)),
-                style: F.body.copyWith(color: p.ink3),
-              ),
-            ],
-          ),
-          const SizedBox(height: S.x1),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: Text(
-            win == 1
-                ? (l?.metricDetailToday ?? 'Today')
-                : (l?.metricDetailDailyAverage(vals.length, win) ??
-                    'Daily average · ${vals.length} of $win days'),
-            style: F.cap.copyWith(color: p.ink3),
-          ),
+        Align(alignment: Alignment.centerLeft,
+          child: Text((win == 1
+              ? (l?.metricDetailToday ?? 'Today')
+              : (l?.metricDetailDailyAverage(vals.length, win) ??
+                  'Daily average · ${vals.length} of $win days')).toUpperCase(),
+              style: F.over.copyWith(color: p.ink3, letterSpacing: 1.1))),
+        const SizedBox(height: S.x2),
+        Align(alignment: Alignment.centerLeft,
+          child: Wrap(crossAxisAlignment: WrapCrossAlignment.end,
+            spacing: S.x2, children: [
+              Text(_fmt(spec, mean),
+                  style: (win == 1 ? F.n64 : F.n34).copyWith(color: p.ink)),
+              if (unitBeside(spec.unit).isNotEmpty)
+                Padding(padding: const EdgeInsets.only(bottom: S.x2),
+                  child: Text(uiText(context, unitBeside(spec.unit)),
+                      style: F.body.copyWith(color: p.ink3))),
+            ]),
         ),
         // On a multi-day window the average is the headline, so the newest
         // reading needs its own line. On Today they are the same number, and
@@ -1261,7 +1315,7 @@ class _MetricDetailState extends State<MetricDetail> {
             ),
           ),
         ],
-        if (d.sources.length >= 2) ...[
+        if (!widget.readOnly && d.sources.length >= 2) ...[
           const SizedBox(height: S.x4),
           DeviceFilter(
             options: d.sources,
@@ -1339,7 +1393,7 @@ class _MetricDetailState extends State<MetricDetail> {
                 return ChartFrame(
                   title: uiText(context, spec.title),
                   unit: spec.unit.isEmpty ? 'score' : spec.unit,
-                  height: 150,
+                  height: 232,
                   yAxis: axis,
                   band: band,
                   bandColor: p.wash(spec.color),
@@ -1367,9 +1421,13 @@ class _MetricDetailState extends State<MetricDetail> {
             // Slot 0 is `length - 1` days behind today, not `length` — the
             // last slot IS today. A 30-slot window spans 29 days of distance.
             xLabels: [
-              l?.metricDetailDaysAgoLabel(series.length - 1) ??
-                  '${series.length - 1} day${series.length == 2 ? '' : 's'} ago',
-              l?.metricDetailToday ?? 'Today',
+              localizedDate(DateTime(DateTime.now().year,
+                  DateTime.now().month, DateTime.now().day - series.length + 1),
+                  l?.localeName ?? Localizations.localeOf(c).languageCode,
+                  pattern: 'd MMM'),
+              localizedDate(DateTime.now(),
+                  l?.localeName ?? Localizations.localeOf(c).languageCode,
+                  pattern: 'd MMM'),
             ],
             // The dots are already beside the big number two rows up; twice on
             // one card reads as two different claims.
@@ -1400,10 +1458,11 @@ class _MetricDetailState extends State<MetricDetail> {
                   ? CustomPaint(
                       size: Size.infinite,
                       painter: LineChart(series, p.on(spec.color),
-                          fill: axis?.min == 0,
+                          smooth: false,
+                          fill: false,
                           dots: series.length <= 40,
                           t: animate(c, 1),
-                          dotInk: p.card,
+                          dotInk: p.bg,
                           axis: axis,
                           selectedX: _pick == null
                               ? null
@@ -1417,10 +1476,11 @@ class _MetricDetailState extends State<MetricDetail> {
                       CustomPaint(
                         size: Size.infinite,
                         painter: LineChart(series, p.ink3,
-                            fill: axis?.min == 0,
+                            smooth: false,
+                            fill: false,
                             dots: series.length <= 40,
                             t: animate(c, 1),
-                            dotInk: p.card,
+                            dotInk: p.bg,
                             axis: axis),
                       ),
                       CustomPaint(
@@ -1431,10 +1491,11 @@ class _MetricDetailState extends State<MetricDetail> {
                                 dim[i] ? null : series[i],
                             ],
                             p.on(spec.color),
-                            fill: axis?.min == 0,
+                            smooth: false,
+                            fill: false,
                             dots: series.length <= 40,
                             t: animate(c, 1),
-                            dotInk: p.card,
+                            dotInk: p.bg,
                             axis: axis,
                             selectedX: _pick == null
                                 ? null
@@ -1603,11 +1664,13 @@ class _MetricDetailState extends State<MetricDetail> {
       child: Surface(
         color: p.card2,
         elevation: 0,
-        onTap: v == null ? null : () => go(c, _dayScreen(widget.metricKey, day)),
+        onTap: widget.readOnly || v == null ? null : () => go(c, _dayScreen(widget.metricKey, day)),
         semanticLabel: [
           v == null
               ? (l?.metricDetailSlotNoRecord(prettyDay(day, l)) ??
                   '${prettyDay(day, l)}, no record')
+              : widget.readOnly
+              ? prettyDay(day, l)
               : (l?.metricDetailOpenDay(prettyDay(day, l)) ??
                   'Open ${prettyDay(day, l)}'),
           if (attributed) who,
@@ -1634,7 +1697,7 @@ class _MetricDetailState extends State<MetricDetail> {
                   ? F.cap.copyWith(color: p.ink3)
                   : F.n17.copyWith(color: p.ink),
             ),
-            if (v != null) ...[
+            if (v != null && !widget.readOnly) ...[
               const SizedBox(width: S.x2),
               Icon(LucideIcons.chevronRight, size: 18, color: p.ink3),
             ],
@@ -2050,17 +2113,21 @@ class DayNav extends StatelessWidget {
     final older = i < 0 ? days.first : (i + 1 < days.length ? days[i + 1] : null);
     final newer = i > 0 ? days[i - 1] : null;
 
-    Widget arrow(IconData icon, String label, String? to) => Opacity(
+    Widget arrow(IconData icon, String label, String? to) => Semantics(
+          container: true,
+          enabled: to != null,
+          child: Opacity(
           opacity: to == null ? .35 : 1,
           child: Pressable(
             onTap: to == null ? null : () => onDay(to),
             semanticLabel: label,
             child: Icon(icon, size: 20, color: p.ink),
           ),
+          ),
         );
 
     return Container(
-      decoration: BoxDecoration(color: p.card2, borderRadius: R.rMd),
+      decoration: BoxDecoration(color: p.card2, borderRadius: R.rPill),
       child: Row(children: [
         arrow(LucideIcons.chevronLeft, l?.metricDetailPreviousDay ?? 'Previous day',
             older),
@@ -2074,11 +2141,11 @@ class DayNav extends StatelessWidget {
                   l?.metricDetailChooseDayShowing(dayNavLabel(day, l)) ??
                   'Choose a day. Showing ${dayNavLabel(day, l)}',
               child: Text(
-                dayNavLabel(day, l),
+                dayNavLabel(day, l).toUpperCase(),
                 textAlign: TextAlign.center,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-              style: F.body.copyWith(color: p.ink, fontWeight: FontWeight.w600),
+              style: F.over.copyWith(color: p.ink, letterSpacing: 1.1),
               ),
             ),
           ),

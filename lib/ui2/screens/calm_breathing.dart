@@ -2,7 +2,7 @@
 //
 // The phase engine is `lib/stress/breath_phases.dart`, which is pure and
 // shared with the interval timer. This screen owns only the clock: a `Ticker`
-// hands it elapsed time, `phaseAt` turns that into a phase, and `BreathRing`
+// hands it elapsed time, `phaseAt` turns that into a phase, and the breathing guide
 // draws the phase. Nothing here loops on its own — the design system bans
 // `.repeat()` precisely because thirteen ungated tickers is what the old UI
 // shipped, and a loop nobody owns cannot be stopped by the reduced-motion
@@ -13,6 +13,7 @@
 // no score.
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -537,21 +538,34 @@ class _CalmBreathingState extends State<CalmBreathing>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Pressable(
-                    semanticLabel:
-                        l?.calmBreathingCloseBreathing ?? 'Close breathing',
-                    onTap: () async {
-                      if (_running) {
-                        await _stop(abort: true);
-                      } else if (_quiet != null) {
-                        await _abortQuiet();
-                      }
-                      if (c.mounted) Navigator.of(c).pop();
-                    },
-                    child: Icon(LucideIcons.x, size: 22, color: p.ink2),
-                  ),
+                Row(
+                  children: [
+                    Pressable(
+                      semanticLabel:
+                          l?.calmBreathingCloseBreathing ?? 'Close breathing',
+                      onTap: () async {
+                        if (_running) {
+                          await _stop(abort: true);
+                        } else if (_quiet != null) {
+                          await _abortQuiet();
+                        }
+                        if (c.mounted) Navigator.of(c).pop();
+                      },
+                      child: Icon(LucideIcons.x, size: S.x6, color: p.ink2),
+                    ),
+                    Expanded(
+                      child: Text(
+                        (busy
+                                ? _pattern.label
+                                : (l?.calmBreathingTakeABreath ??
+                                      'Take a breath.'))
+                            .toUpperCase(),
+                        textAlign: TextAlign.center,
+                        style: F.section.copyWith(color: p.ink),
+                      ),
+                    ),
+                    const SizedBox(width: S.tap),
+                  ],
                 ),
                 Expanded(
                   child: _quiet != null
@@ -582,7 +596,7 @@ class _CalmBreathingState extends State<CalmBreathing>
                           onSweep: _startSweep,
                         ),
                 ),
-                BigButton(
+                _BreathingAction(
                   _quiet == 'post'
                       ? (l?.calmBreathingFinishNow ?? 'Finish now')
                       : _quiet == 'pre'
@@ -594,11 +608,6 @@ class _CalmBreathingState extends State<CalmBreathing>
                       : (_finished
                             ? (l?.actionDone ?? 'Done')
                             : (l?.calmBreathingBegin ?? 'Begin')),
-                  icon: (_running || _quiet != null)
-                      ? LucideIcons.square
-                      : LucideIcons.play,
-                  color: C.domMind,
-                  soft: _running || _quiet != null,
                   onTap: _quiet == 'post'
                       ? _endWindows
                       : _quiet != null
@@ -649,8 +658,10 @@ class _Setup extends StatelessWidget {
     return ListView(
       children: [
         const SizedBox(height: S.x4),
-        Text(l?.calmBreathingTakeABreath ?? 'Take a breath.',
-            style: F.t1.copyWith(color: p.ink)),
+        Text(
+          pattern.label.toUpperCase(),
+          style: F.title.copyWith(color: p.ink),
+        ),
         const SizedBox(height: S.x2),
         // The buzz is band-dependent and this screen does not yet know whether
         // the band will accept the session, so it is not promised here. The
@@ -659,51 +670,36 @@ class _Setup extends StatelessWidget {
           l?.calmBreathingRingLeads ?? 'The ring leads. Put the phone down.',
           style: F.cap.copyWith(color: p.ink2, height: 1.5),
         ),
+        const SizedBox(height: S.x5),
+        Surface(
+          color: p.card2,
+          child: Wrap(
+            spacing: S.x5,
+            runSpacing: S.x3,
+            children: [
+              for (final phase in pattern.phases)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${phase.seconds == phase.seconds.roundToDouble() ? phase.seconds.round() : phase.seconds.toStringAsFixed(1)}s',
+                      style: F.n24.copyWith(color: p.ink),
+                    ),
+                    const SizedBox(height: S.x1),
+                    Text(
+                      breathPhaseKindLabel(phase.kind, l).toUpperCase(),
+                      style: F.section.copyWith(color: p.ink3),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
         for (final b in patternsFor(yours, l))
           Padding(
             padding: const EdgeInsets.only(top: S.x3),
-            child: Surface(
-              onTap: () => onPattern(b),
-              color: b.key == pattern.key ? P.of(c).wash(C.domMind) : null,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                b.label,
-                                style: F.body.copyWith(
-                                  color: p.ink,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            if (b.coherenceRated) ...[
-                              const SizedBox(width: S.x2),
-                              Pill(l?.calmBreathingScoredPill ?? 'Scored', C.domMind),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: S.x1),
-                        Text(
-                          b.description,
-                          style: F.cap.copyWith(color: p.ink3, height: 1.4),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: S.x3),
-                  Text(
-                    '${b.rate.toStringAsFixed(1)}/min',
-                    style: F.n17.copyWith(color: p.on(C.domMind)),
-                  ),
-                ],
-              ),
-            ),
+            child: _patternChoice(c, p, b),
           ),
         Section(
           l?.calmBreathingHowLong ?? 'How long',
@@ -721,14 +717,17 @@ class _Setup extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: S.x3),
                           decoration: BoxDecoration(
-                            color: m == minutes ? p.fill(C.domMind) : p.card,
-                            borderRadius: R.rMd,
+                            color: m == minutes ? p.card2 : p.card,
+                            borderRadius: R.rSm,
+                            border: Border.all(
+                              color: m == minutes ? p.on(C.domSleep) : p.line,
+                            ),
                           ),
                           child: Center(
                             child: Text(
                               l?.calmBreathingMinutesAbbrev(m) ?? '$m min',
-                              style: F.body.copyWith(
-                                color: m == minutes ? p.inkOnFill : p.ink2,
+                              style: F.n24.copyWith(
+                                color: m == minutes ? p.ink : p.ink2,
                               ),
                             ),
                           ),
@@ -750,9 +749,69 @@ class _Setup extends StatelessWidget {
         // and a comparison, which is not what someone who opened this screen
         // to breathe came for; it lives one tap away rather than as a fourth
         // thing to read before beginning.
-        Section(l?.calmBreathingYourOwnPace ?? 'Your own pace',
-            _sweepDoor(c, p, app.isConnected, yours)),
+        Section(
+          l?.calmBreathingYourOwnPace ?? 'Your own pace',
+          _sweepDoor(c, p, app.isConnected, yours),
+        ),
       ],
+    );
+  }
+
+  Widget _patternChoice(BuildContext c, P p, BreathPattern b) {
+    final l = AppLocalizations.of(c);
+    final selected = b.key == pattern.key;
+    final description = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: S.x2,
+          runSpacing: S.x2,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              b.label.toUpperCase(),
+              style: F.section.copyWith(color: p.ink),
+            ),
+            if (b.coherenceRated)
+              Pill(l?.calmBreathingScoredPill ?? 'Scored', C.domMind),
+          ],
+        ),
+        const SizedBox(height: S.x1),
+        Text(b.description, style: F.cap.copyWith(color: p.ink3, height: 1.4)),
+      ],
+    );
+    final rate = Text(
+      '${b.rate.toStringAsFixed(1)}/min',
+      style: F.n24.copyWith(color: p.on(C.domSleep)),
+    );
+    return Surface(
+      onTap: () => onPattern(b),
+      color: selected ? p.card2 : null,
+      child: Semantics(
+        selected: selected,
+        child: bigText(c)
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  description,
+                  const SizedBox(height: S.x3),
+                  rate,
+                ],
+              )
+            : Row(
+                children: [
+                  Icon(
+                    selected ? LucideIcons.circleCheck : LucideIcons.circle,
+                    size: S.x5,
+                    color: selected ? p.on(C.domSleep) : p.ink3,
+                  ),
+                  const SizedBox(width: S.x3),
+                  Expanded(child: description),
+                  const SizedBox(width: S.x3),
+                  rate,
+                ],
+              ),
+      ),
     );
   }
 
@@ -770,7 +829,8 @@ class _Setup extends StatelessWidget {
     return Surface(
       onTap: connected ? () => onWindows(!windows) : null,
       color: on ? p.wash(C.domMind) : null,
-      semanticLabel: l?.calmBreathingWindowRowSemantic ??
+      semanticLabel:
+          l?.calmBreathingWindowRowSemantic ??
           'Measure before and after, adds four minutes',
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -797,8 +857,8 @@ class _Setup extends StatelessWidget {
                 Text(
                   !connected
                       ? (l?.calmBreathingNeedsBandBeatTiming ??
-                          'Needs the band on — the comparison is made from '
-                              'beat timing.')
+                            'Needs the band on — the comparison is made from '
+                                'beat timing.')
                       : breathingEffectLine(e ?? _noSessionsYet),
                   style: F.cap.copyWith(color: p.ink3, height: 1.4),
                 ),
@@ -820,61 +880,61 @@ class _Setup extends StatelessWidget {
     );
   }
 
-  Widget _sweepDoor(
-    BuildContext c,
-    P p,
-    bool connected,
-    double? yours,
-  ) {
+  Widget _sweepDoor(BuildContext c, P p, bool connected, double? yours) {
     final l = AppLocalizations.of(c);
     return Surface(
-    // Not offered without a band: the entire output is a comparison of
-    // beat timing, so an unbanded sweep is six minutes taken for nothing.
-    onTap: connected ? onSweep : null,
-    child: Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l?.calmBreathingFindYourPace ?? 'Find the pace your heart follows',
-                style: F.body.copyWith(
-                  color: connected ? p.ink : p.ink3,
-                  fontWeight: FontWeight.w600,
+      // Not offered without a band: the entire output is a comparison of
+      // beat timing, so an unbanded sweep is six minutes taken for nothing.
+      onTap: connected ? onSweep : null,
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l?.calmBreathingFindYourPace ??
+                      'Find the pace your heart follows',
+                  style: F.body.copyWith(
+                    color: connected ? p.ink : p.ink3,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              const SizedBox(height: S.x1),
-              Text(
-                !connected
-                    ? (l?.calmBreathingNeedsBandBeatTiming ??
-                        'Needs the band on — the comparison is made from '
-                            'beat timing.')
-                    : yours == null
-                    ? (l?.calmBreathingSweepIntro(kPaceSweepRates
-                                .map((r) => r.toStringAsFixed(1))
-                                .join(', ')) ??
-                        'Six minutes: '
-                            '${kPaceSweepRates.map((r) => r.toStringAsFixed(1)).join(', ')} '
-                            'breaths a minute, two minutes each. It takes '
-                            'two sittings that agree before anything changes.')
-                    : (l?.calmBreathingSweepAgreed(yours.toStringAsFixed(1)) ??
-                        'Two sittings agreed on '
-                            '${yours.toStringAsFixed(1)} breaths a minute, '
-                            'and Resonance is paced there. Run it again to '
-                            'check.'),
-                style: F.cap.copyWith(color: p.ink3, height: 1.4),
-              ),
-            ],
+                const SizedBox(height: S.x1),
+                Text(
+                  !connected
+                      ? (l?.calmBreathingNeedsBandBeatTiming ??
+                            'Needs the band on — the comparison is made from '
+                                'beat timing.')
+                      : yours == null
+                      ? (l?.calmBreathingSweepIntro(
+                              kPaceSweepRates
+                                  .map((r) => r.toStringAsFixed(1))
+                                  .join(', '),
+                            ) ??
+                            'Six minutes: '
+                                '${kPaceSweepRates.map((r) => r.toStringAsFixed(1)).join(', ')} '
+                                'breaths a minute, two minutes each. It takes '
+                                'two sittings that agree before anything changes.')
+                      : (l?.calmBreathingSweepAgreed(
+                              yours.toStringAsFixed(1),
+                            ) ??
+                            'Two sittings agreed on '
+                                '${yours.toStringAsFixed(1)} breaths a minute, '
+                                'and Resonance is paced there. Run it again to '
+                                'check.'),
+                  style: F.cap.copyWith(color: p.ink3, height: 1.4),
+                ),
+              ],
+            ),
           ),
-        ),
-        if (connected) ...[
-          const SizedBox(width: S.x3),
-          Icon(LucideIcons.chevronRight, size: 18, color: p.ink3),
+          if (connected) ...[
+            const SizedBox(width: S.x3),
+            Icon(LucideIcons.chevronRight, size: 18, color: p.ink3),
+          ],
         ],
-      ],
-    ),
-  );
+      ),
+    );
   }
 }
 
@@ -913,39 +973,77 @@ class _Running extends StatelessWidget {
     // Reduced motion holds the ring still at the phase's destination rather
     // than sweeping to it — the words still change, so the pacing survives.
     final t = animate(c, breathScale(kind, progress));
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        if (block != null) ...[
-          Text(
-            l?.calmBreathingPaceOfRate(
-                    block! + 1, kPaceSweepRates.length, pattern.rate.toStringAsFixed(1)) ??
-                'PACE ${block! + 1} OF ${kPaceSweepRates.length} · '
-                '${pattern.rate.toStringAsFixed(1)} BREATHS A MINUTE',
-            textAlign: TextAlign.center,
-            style: F.over.copyWith(color: p.ink3),
+    final accent = switch (kind) {
+      BreathPhaseKind.inhale ||
+      BreathPhaseKind.holdIn ||
+      BreathPhaseKind.work => C.orange,
+      _ => C.domSleep,
+    };
+    final remaining = at == null
+        ? null
+        : (at.phase.seconds * (1 - progress)).ceil().clamp(0, 999);
+    return LayoutBuilder(
+      builder: (c, box) {
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: box.maxHeight),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(height: S.x6),
+                if (block != null) ...[
+                  Text(
+                    l?.calmBreathingPaceOfRate(
+                          block! + 1,
+                          kPaceSweepRates.length,
+                          pattern.rate.toStringAsFixed(1),
+                        ) ??
+                        'PACE ${block! + 1} OF ${kPaceSweepRates.length} · '
+                            '${pattern.rate.toStringAsFixed(1)} BREATHS A MINUTE',
+                    textAlign: TextAlign.center,
+                    style: F.section.copyWith(color: p.ink3),
+                  ),
+                  const SizedBox(height: S.x5),
+                ],
+                BreathCircle(
+                  t: t,
+                  label: breathPhaseKindLabel(kind, l),
+                  countdown: remaining?.toString(),
+                  accent: accent,
+                ),
+                const SizedBox(height: S.x6),
+                Text(
+                  breathPhaseKindLabel(kind, l),
+                  textAlign: TextAlign.center,
+                  style: F.t2.copyWith(color: p.ink),
+                ),
+                const SizedBox(height: S.x5),
+                Text(_clock(elapsed), style: F.n34.copyWith(color: p.ink2)),
+                if (target != null) ...[
+                  const SizedBox(height: S.x1),
+                  Text(
+                    l?.calmBreathingOfClock(_clock(target!)) ??
+                        'of ${_clock(target!)}',
+                    style: F.cap.copyWith(color: p.ink3),
+                  ),
+                ],
+                if (!banded) ...[
+                  const SizedBox(height: S.x6),
+                  StatusCard(
+                    l?.calmBreathingNoScoreForSession ??
+                        'No coherence score for this session',
+                    l?.calmBreathingScoringNeedsBand ??
+                        'Scoring needs beat timing from the band. Not connected, so '
+                            'this one paces you but is not saved.',
+                    icon: LucideIcons.bluetoothOff,
+                  ),
+                ],
+                const SizedBox(height: S.x6),
+              ],
+            ),
           ),
-          const SizedBox(height: S.x5),
-        ],
-        BreathCircle(t: t, label: breathPhaseKindLabel(kind, l)),
-        const SizedBox(height: S.x8),
-        Text(_clock(elapsed), style: F.n34.copyWith(color: p.ink2)),
-        if (target != null) ...[
-          const SizedBox(height: S.x1),
-          Text(l?.calmBreathingOfClock(_clock(target!)) ?? 'of ${_clock(target!)}',
-              style: F.cap.copyWith(color: p.ink3)),
-        ],
-        if (!banded) ...[
-          const SizedBox(height: S.x6),
-          StatusCard(
-            l?.calmBreathingNoScoreForSession ?? 'No coherence score for this session',
-            l?.calmBreathingScoringNeedsBand ??
-                'Scoring needs beat timing from the band. Not connected, so '
-                    'this one paces you but is not saved.',
-            icon: LucideIcons.bluetoothOff,
-          ),
-        ],
-      ],
+        );
+      },
     );
   }
 }
@@ -970,75 +1068,193 @@ class _Quiet extends StatelessWidget {
     final l = AppLocalizations.of(c);
     final p = P.of(c);
     final pre = phase == 'pre';
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          pre
-              ? (l?.calmBreathingBeforeLabel ?? 'BEFORE')
-              : (l?.calmBreathingAfterLabel ?? 'AFTER'),
-          textAlign: TextAlign.center,
-          style: F.over.copyWith(color: p.ink3),
+    return LayoutBuilder(
+      builder: (c, box) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: box.maxHeight),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                pre
+                    ? (l?.calmBreathingBeforeLabel ?? 'BEFORE')
+                    : (l?.calmBreathingAfterLabel ?? 'AFTER'),
+                textAlign: TextAlign.center,
+                style: F.over.copyWith(color: p.ink3),
+              ),
+              const SizedBox(height: S.x4),
+              Text(
+                pre
+                    ? (l?.calmBreathingSitStill ?? 'Sit still for a moment.')
+                    : (l?.calmBreathingStaySitting ?? 'Stay sitting.'),
+                textAlign: TextAlign.center,
+                style: F.t2.copyWith(color: p.ink),
+              ),
+              const SizedBox(height: S.x3),
+              Text(
+                l?.calmBreathingNothingPacingScored ??
+                    'Breathe however you normally would. Nothing is pacing you and '
+                        'nothing is being scored.',
+                textAlign: TextAlign.center,
+                style: F.cap.copyWith(color: p.ink2, height: 1.5),
+              ),
+              const SizedBox(height: S.x8),
+              Text(
+                _clock(elapsed),
+                textAlign: TextAlign.center,
+                style: F.n64.copyWith(color: p.ink2),
+              ),
+              const SizedBox(height: S.x1),
+              Text(
+                l?.calmBreathingOfClock(_clock(kBreathingWindow)) ??
+                    'of ${_clock(kBreathingWindow)}',
+                textAlign: TextAlign.center,
+                style: F.cap.copyWith(color: p.ink3),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: S.x4),
-        Text(
-          pre
-              ? (l?.calmBreathingSitStill ?? 'Sit still for a moment.')
-              : (l?.calmBreathingStaySitting ?? 'Stay sitting.'),
-          textAlign: TextAlign.center,
-          style: F.t2.copyWith(color: p.ink),
-        ),
-        const SizedBox(height: S.x3),
-        Text(
-          l?.calmBreathingNothingPacingScored ??
-              'Breathe however you normally would. Nothing is pacing you and '
-              'nothing is being scored.',
-          textAlign: TextAlign.center,
-          style: F.cap.copyWith(color: p.ink2, height: 1.5),
-        ),
-        const SizedBox(height: S.x8),
-        Text(
-          _clock(elapsed),
-          textAlign: TextAlign.center,
-          style: F.n34.copyWith(color: p.ink2),
-        ),
-        const SizedBox(height: S.x1),
-        Text(
-          l?.calmBreathingOfClock(_clock(kBreathingWindow)) ??
-              'of ${_clock(kBreathingWindow)}',
-          textAlign: TextAlign.center,
-          style: F.cap.copyWith(color: p.ink3),
-        ),
-      ],
+      ),
     );
   }
 }
 
 /// The ring plus its instruction. Public so the goldens can capture it —
-/// the ring's phase is a plain number, which is the whole point of
-/// `BreathRing.t`.
+/// the ring's phase remains a plain number, with no clock owned by the painter.
 class BreathCircle extends StatelessWidget {
-  const BreathCircle({super.key, required this.t, required this.label});
+  const BreathCircle({
+    super.key,
+    required this.t,
+    required this.label,
+    this.countdown,
+    this.accent = C.domSleep,
+  });
 
   final double t;
   final String label;
+  final String? countdown;
+  final Color accent;
 
   @override
   Widget build(BuildContext c) {
     final p = P.of(c);
-    return SizedBox(
-      width: 240,
-      height: 240,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          CustomPaint(
-            size: const Size(240, 240),
-            painter: BreathRing(t, p.on(C.domMind)),
+    return LayoutBuilder(
+      builder: (c, box) {
+        final size = math.min(box.maxWidth, S.x16 * 4.5);
+        return SizedBox(
+          width: size,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: size),
+            child: Semantics(
+              label: countdown == null ? label : '$label, $countdown',
+              child: ExcludeSemantics(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Positioned.fill(
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: _BreathGuidePainter(
+                            animate(c, t),
+                            p.on(accent),
+                            p.ink3,
+                            p.bg,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(S.x6),
+                      child: Text(
+                        countdown ?? label,
+                        textAlign: TextAlign.center,
+                        style: (countdown == null ? F.t2 : F.n64).copyWith(
+                          color: p.ink,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
-          Text(label, style: F.head.copyWith(color: p.ink)),
-        ],
+        );
+      },
+    );
+  }
+}
+
+class _BreathGuidePainter extends CustomPainter {
+  final double t;
+  final Color accent, guide, background;
+  _BreathGuidePainter(this.t, this.accent, this.guide, this.background);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final outer = math.min(size.width, size.height) / 2 - S.x2;
+    if (outer <= 0) return;
+    final dotted = Paint()
+      ..color = guide.withValues(alpha: .55)
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+    final circle = Rect.fromCircle(center: center, radius: outer);
+    for (var i = 0; i < 120; i++) {
+      canvas.drawArc(circle, i * math.pi / 60, math.pi / 240, false, dotted);
+    }
+    final radius = outer * (.34 + .6 * t.clamp(0, 1));
+    final inner = Rect.fromCircle(center: center, radius: radius);
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [background, background, accent.withValues(alpha: .22)],
+          stops: const [0, .6, 1],
+        ).createShader(inner),
+    );
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = accent
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _BreathGuidePainter old) =>
+      old.t != t ||
+      old.accent != accent ||
+      old.guide != guide ||
+      old.background != background;
+}
+
+class _BreathingAction extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _BreathingAction(this.label, {required this.onTap});
+
+  @override
+  Widget build(BuildContext c) {
+    final p = P.of(c);
+    return Pressable(
+      onTap: onTap,
+      semanticLabel: label,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: S.x5, vertical: S.x4),
+        decoration: BoxDecoration(
+          border: Border.all(color: p.on(C.domSleep), width: 1.5),
+          borderRadius: R.rPill,
+        ),
+        child: Text(
+          label.toUpperCase(),
+          textAlign: TextAlign.center,
+          style: F.section.copyWith(color: p.on(C.domSleep)),
+        ),
       ),
     );
   }
@@ -1098,7 +1314,7 @@ class _Result extends StatelessWidget {
       children: [
         const SizedBox(height: S.x8),
         Text(l?.calmBreathingThatIsDone ?? 'That is done.',
-            style: F.t1.copyWith(color: p.ink)),
+            style: F.title.copyWith(color: p.ink)),
         const SizedBox(height: S.x5),
         if (absent != null)
           absent

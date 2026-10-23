@@ -26,6 +26,7 @@ import '../../health/health_import_state.dart';
 import '../../health/auto_workout_import.dart';
 import '../../health/health_workout_import.dart';
 import '../../l10n/app_localizations.dart';
+import '../../l10n/date_text.dart';
 import '../../models/metric.dart';
 import '../../state/app_state.dart';
 import '../../state/clock_format.dart' show formatClockOf;
@@ -46,7 +47,6 @@ import '../../data/day_label.dart' show calendarDaysBetween;
 import 'log_workout.dart';
 import 'metric_detail.dart' show MetricDetail, detailLinkRow;
 import 'nutrition_screen.dart';
-import 'start_card.dart';
 
 class WorkoutScreen extends StatefulWidget {
   const WorkoutScreen({super.key});
@@ -90,13 +90,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
       builder: (c, snap) {
         final loc = AppLocalizations.of(c);
         final d = snap.data ?? const _WorkoutData.empty();
-        // THE LIST DROPS ITS SIDE PADDING and hands it to each child instead,
-        // so the hero card can be the one child that does not get it and runs
-        // edge to edge. Two earlier attempts had the CARD escape its parent —
-        // a negative margin (which Flutter asserts against) and an OverflowBox
-        // (which takes an unbounded height inside a scroll view and blanked
-        // this whole tab on device). Padding the siblings is ordinary layout
-        // and cannot do either.
+        // The score, actions and history use the same page inset.
         return ListView(
           padding: const EdgeInsets.fromLTRB(0, S.x2, 0, S.x16),
           children: [
@@ -112,9 +106,6 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
                 _ => _history(c, d),
               },
             ])
-              if (w is StartCard)
-                w
-              else
                 Padding(
                     padding: const EdgeInsets.symmetric(horizontal: S.x4),
                     child: w),
@@ -132,36 +123,91 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
   ActivityHost _host(_WorkoutData d) =>
       activityHost(context.read<AppState>(), history: d.setHistory);
 
+  Widget _quickTile(BuildContext c, _WorkoutData d, Activity a) =>
+      WorkoutQuickTile(a, () => Navigator.of(c).push(MaterialPageRoute(
+          builder: (_) => ActivitySetup(a,
+              weightKg: d.weightKg, host: _host(d)))));
+
   // ─────────────── FOR YOU ───────────────
   List<Widget> _forYou(BuildContext c, _WorkoutData d) {
     final p = P.of(c);
     final loc = AppLocalizations.of(c);
     return [
-      StartCard(
-        label: loc?.workoutStartSessionLabel ?? 'START A SESSION',
-        count: allActivities.length,
-        noun: loc?.workoutActivitiesNoun ?? 'activities',
-        asset: 'mascot_workout.png',
-        accent: C.purple,
-        deep: C.indigo,
+      if(d.dayStrain?.strain != null) ...[
+        _strainHero(c, p, d.dayStrain!),
+        const SizedBox(height: S.x4),
+      ],
+      Surface(
+        pad: const EdgeInsets.all(S.x5),
+        color: p.card,
         onTap: () => _openPicker(c, d),
+        semanticLabel: loc?.workoutStartSessionLabel ?? 'START A SESSION',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(LucideIcons.activity, size: 20, color: p.on(C.domMove)),
+                const SizedBox(width: S.x2),
+                Expanded(
+                  child: Text(
+                    (loc?.workoutStartSessionLabel ?? 'START A SESSION')
+                        .toUpperCase(),
+                    style: F.over.copyWith(color: p.ink),
+                  ),
+                ),
+                Icon(LucideIcons.chevronRight, size: 18, color: p.ink3),
+              ],
+            ),
+            const SizedBox(height: S.x2),
+            Text(
+              '${allActivities.length} ${loc?.workoutActivitiesNoun ?? 'activities'}',
+              style: F.cap.copyWith(color: p.ink3),
+            ),
+            const SizedBox(height: S.x5),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: S.x5,
+                vertical: S.x4,
+              ),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: p.fill(C.domMove),
+                borderRadius: R.rPill,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(LucideIcons.plus, size: 18, color: p.inkOnFill),
+                  const SizedBox(width: S.x2),
+                  Flexible(
+                    child: Text(
+                      (loc?.workoutStartSessionLabel ?? 'START A SESSION')
+                          .toUpperCase(),
+                      style: F.over.copyWith(color: p.inkOnFill),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ]),
       ),
       const SizedBox(height: S.x3),
-      Row(
-        children: [
+      if (bigText(c))
+        Column(children: [
+          for (var i = 0; i < 3; i++) ...[
+            if (i > 0) const SizedBox(height: S.x3),
+            _quickTile(c, d, quickStart[i]),
+          ],
+        ])
+      else
+        Row(children: [
           for (var i = 0; i < 3; i++) ...[
             if (i > 0) const SizedBox(width: S.x3),
-            Expanded(
-              child: WorkoutQuickTile(
-              quickStart[i],
-              () => Navigator.of(c).push(MaterialPageRoute(
-                  builder: (_) => ActivitySetup(quickStart[i],
-                      weightKg: d.weightKg, host: _host(d)))),
-            ),
-            ),
+            Expanded(child: _quickTile(c, d, quickStart[i])),
           ],
-        ],
-      ),
+        ]),
       // Steps and food, which used to be a Home tile and a tab of their own.
       // Doors, not cards: the numbers live one tap down.
       Section(
@@ -210,14 +256,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
                     decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: done
-                            ? p.wash(C.green, strength: 1.5)
-                            : (i == today ? p.fill(C.purple) : p.card2)),
+                            ? p.wash(C.domMove)
+                            : (i == today ? p.fill(C.domMove) : p.card2)),
                     child: Icon(
                         done
                             ? LucideIcons.check
                             : (i == today ? LucideIcons.play : null),
                         size: 14,
-                        color: done ? p.on(C.green) : p.inkOnFill),
+                        color: done ? p.on(C.domMove) : p.inkOnFill),
                   ),
                 ]),
               );
@@ -256,6 +302,79 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
             .push(MaterialPageRoute(builder: (_) => const DayStrainDetail())),
       ),
     ];
+  }
+
+  Widget _strainHero(BuildContext c, P p, DayStrainData d) {
+    final l = AppLocalizations.of(c);
+    final value = d.strain;
+    final day = d.day;
+    // The seam can serve the last settled day. Keep that date attached.
+    final dayText = day == null ? null : displayDate(c, day);
+    return Pressable(
+      semanticLabel: l?.dayStrainTitle ?? 'Day strain' ,
+      onTap: () => Navigator.of(
+        c,
+      ).push(MaterialPageRoute(builder: (_) => DayStrainDetail(data: d))),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: S.x3),
+        child: Column(
+          children: [
+            if (dayText != null) ...[
+              Text(dayText.toUpperCase(), style: F.over.copyWith(color: p.ink3)),
+              const SizedBox(height: S.x4),
+            ],
+            SizedBox(
+              width: 240,
+              height: 240,
+              child: CustomPaint(
+                painter: Ring(
+                  value == null ? 0 : value / 21,
+                  p.on(C.domMove),
+                  p.track,
+                  stroke: S.x3,
+                  solid: true,
+                  t: animate(c, 1),
+                ),
+                child: Center(
+                  child: Padding(
+                  padding: const EdgeInsets.all(S.x5),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          value?.toStringAsFixed(1) ?? '—',
+                          style: F.hero.copyWith(color: p.ink),
+                        ),
+                        const SizedBox(height: S.x2),
+                        Text(
+                          (l?.dayStrainTitle ?? 'Day strain').toUpperCase(),
+                          style: F.over.copyWith(color: p.ink2),
+                        ),
+                      ],
+                    ),
+                  )
+                ),
+                ),
+              ),
+            ),
+            const SizedBox(height: S.x4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  l?.dayStrainTitle ?? 'Day strain' ,
+                  style: F.cap.copyWith(color: p.ink2),
+                ),
+                const SizedBox(width: S.x1),
+                Icon(LucideIcons.chevronRight, size: 14, color: p.ink3),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Kilos moved per day over the same seven slots the TRIMP chart uses.
@@ -432,6 +551,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
   List<Widget> _activities(BuildContext c, _WorkoutData d) {
     final p = P.of(c);
     final loc = AppLocalizations.of(c);
+    final columns = bigText(c) ? 1 : 3;
     return [
       Pressable(
         onTap: () => _openPicker(c, d),
@@ -443,10 +563,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
           child: Row(children: [
             Icon(LucideIcons.search, size: 17, color: p.ink3),
             const SizedBox(width: S.x2),
-            Text(
+            Expanded(child: Text(
                 loc?.workoutSearchActivitiesCount(allActivities.length) ??
                     'Search ${allActivities.length} activities',
-                style: F.body.copyWith(color: p.ink3)),
+                style: F.body.copyWith(color: p.ink3))),
           ]),
         ),
       ),
@@ -454,23 +574,15 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
       Text(loc?.workoutQuickStartHeader ?? 'QUICK START',
           style: F.over.copyWith(color: p.ink3)),
       const SizedBox(height: S.x3),
-      for (var row = 0; row < 2; row++) ...[
+      for (var row = 0; row < (quickStart.length / columns).ceil(); row++) ...[
         if (row > 0) const SizedBox(height: S.x3),
-        Row(
-          children: [
-            for (var i = row * 3; i < row * 3 + 3; i++) ...[
-              if (i % 3 > 0) const SizedBox(width: S.x3),
-              Expanded(
-                child: WorkoutQuickTile(
-                quickStart[i],
-                () => Navigator.of(c).push(MaterialPageRoute(
-                    builder: (_) => ActivitySetup(quickStart[i],
-                        weightKg: d.weightKg, host: _host(d)))),
-              ),
-              ),
-            ],
+        Row(children: [
+          for (var i = row * columns;
+              i < math.min(row * columns + columns, quickStart.length); i++) ...[
+            if (i % columns > 0) const SizedBox(width: S.x3),
+            Expanded(child: _quickTile(c, d, quickStart[i])),
           ],
-        ),
+        ]),
       ],
       for (final g in activityLibrary)
         Section(
@@ -678,10 +790,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
           'Delete this ${w.activity.displayName(context).toLowerCase()}?',
       body: w.importedFrom == null
           ? (loc?.workoutDeleteBodyOwn(storeName) ??
-              'It disappears from OpenStrap. A copy in $storeName, if there is '
+              'It disappears from WHOOP. A copy in $storeName, if there is '
                   'one, stays where it is.')
           : (loc?.workoutDeleteBodyImported(storeName) ??
-              'It disappears from OpenStrap and will not be re-imported. '
+              'It disappears from WHOOP and will not be re-imported. '
                   'The original in $storeName stays.'),
     );
     if (!ok || !mounted) return;
@@ -958,27 +1070,30 @@ class WorkoutQuickTile extends StatelessWidget {
   @override
   Widget build(BuildContext c) {
     final p = P.of(c);
+    final icon = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(color: p.card2, borderRadius: R.rSm),
+      child: Icon(a.icon, size: 19, color: p.ink),
+    );
+    final label = Text(a.displayName(c),
+        style: F.over.copyWith(color: p.ink2),
+        textAlign: bigText(c) ? TextAlign.start : TextAlign.center);
     return Surface(
-      pad: const EdgeInsets.symmetric(vertical: S.x4, horizontal: S.x2),
+      pad: const EdgeInsets.symmetric(vertical: S.x4, horizontal: S.x3),
       onTap: onTap,
       semanticLabel: a.displayName(c),
-      child: Column(
-        children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration:
-              BoxDecoration(color: p.wash(a.color), borderRadius: R.rMd),
-          child: Icon(a.icon, size: 19, color: p.on(a.color)),
-        ),
-          const SizedBox(height: S.x2),
-          Text(
-            a.displayName(c),
-            style: F.over.copyWith(color: p.ink2),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
+      child: bigText(c)
+          ? Row(children: [
+              icon,
+              const SizedBox(width: S.x3),
+              Expanded(child: label),
+            ])
+          : Column(children: [
+              icon,
+              const SizedBox(height: S.x2),
+              label,
+            ]),
     );
   }
 }
@@ -1028,8 +1143,8 @@ class _HistoryRow extends StatelessWidget {
             width: 40,
             height: 40,
             decoration:
-                BoxDecoration(color: p.wash(a.color), borderRadius: R.rMd),
-            child: Icon(a.icon, size: 19, color: p.on(a.color)),
+                BoxDecoration(color: p.card2, borderRadius: R.rSm),
+            child: Icon(a.icon, size: 19, color: p.ink),
           ),
               const SizedBox(width: S.x3),
               Expanded(
@@ -1885,6 +2000,7 @@ class _PastWorkout {
 
 class _WorkoutData {
   final double? weightKg;
+  final DayStrainData? dayStrain;
   final _Load? load;
   final String? loadNote;
 
@@ -1946,6 +2062,7 @@ class _WorkoutData {
 
   const _WorkoutData({
     this.weightKg,
+    this.dayStrain,
     this.load,
     this.loadNote,
     this.trimp7 = const [],
@@ -1981,6 +2098,13 @@ Future<_WorkoutData> _loadWorkoutData(AppState app) async {
       weight = (await repo.getProfile())['weight_kg'] as double?;
     } catch (_) {
       weight = null;
+  }
+
+  DayStrainData? dayStrain;
+  try {
+    dayStrain = await DayStrainData.load(repo);
+  } catch (_) {
+    dayStrain = null;
     }
 
     // ONE crossday read for the three blocks that come out of it: `load`
@@ -2182,6 +2306,7 @@ Future<_WorkoutData> _loadWorkoutData(AppState app) async {
 
     return _WorkoutData(
       weightKg: weight,
+    dayStrain: dayStrain,
       load: load,
       loadNote: note,
       trimp7: trimp,

@@ -978,7 +978,7 @@
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = OpenStrapWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = OpenStrapWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Edge;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_OpenStrapAppGroupIdentifier = "$(APP_GROUP_IDENTIFIER)";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -1025,7 +1025,7 @@
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = OpenStrapWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = OpenStrapWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Edge;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_OpenStrapAppGroupIdentifier = "$(APP_GROUP_IDENTIFIER)";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -1069,7 +1069,7 @@
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = OpenStrapWidget/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = OpenStrapWidget;
+				INFOPLIST_KEY_CFBundleDisplayName = Edge;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_OpenStrapAppGroupIdentifier = "$(APP_GROUP_IDENTIFIER)";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

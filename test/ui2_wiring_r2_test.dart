@@ -820,7 +820,8 @@ void main() {
           ));
       expect(find.text('Today'), findsWidgets);
       // Today's headline is today's reading, not a window average.
-      expect(find.textContaining('Daily average'), findsNothing);
+      expect(find.textContaining(RegExp('Daily average', caseSensitive: false)),
+          findsNothing);
     });
 
     testWidgets('the range switcher still goes wide', (t) async {
@@ -833,7 +834,8 @@ void main() {
           ));
       await t.tap(find.text('30 days'));
       await t.pumpAndSettle();
-      expect(find.textContaining('Daily average'), findsOneWidget);
+      expect(find.textContaining(RegExp('Daily average', caseSensitive: false)),
+          findsOneWidget);
     });
   });
 
@@ -1212,10 +1214,10 @@ void main() {
               rhythmV: {'IS': .62, 'IV': .81, 'RA': .74},
               cosinorV: {'acrophase_hours': 15.2}),
           advanced: false);
-      expect(find.text('Day-to-day stability'), findsNothing);
+      expect(find.text('DAY-TO-DAY STABILITY'), findsNothing);
       await t.tap(find.text('Show'));
       await t.pumpAndSettle();
-      expect(find.text('Day-to-day stability'), findsOneWidget);
+      expect(find.text('DAY-TO-DAY STABILITY'), findsOneWidget);
     });
   });
 
@@ -1366,12 +1368,13 @@ void main() {
         ],
       );
       await pumpR(t, d);
-      // Density 2 is unchanged until it is asked for.
-      expect(find.text('Schedule consistency'), findsOneWidget);
-      expect(find.text('Nights least alike'), findsNothing);
+      // The compact uppercase label is visible; pair details remain folded.
+      expect(find.text('SCHEDULE CONSISTENCY'), findsOneWidget);
+      expect(find.text('NIGHTS LEAST ALIKE'), findsNothing);
 
       await t.tap(find.text('Which nights'));
       await t.pumpAndSettle();
+      expect(find.text('NIGHTS LEAST ALIKE'), findsOneWidget);
       expect(find.text('12 Aug → 13 Aug'), findsOneWidget);
       expect(find.text('18 / 100'), findsOneWidget);
       // The pair that agreed MOST is not on screen — one row's worth of fact,
@@ -1389,7 +1392,7 @@ void main() {
             regularity:
                 Metric(value: 62, confidence: .8, tier: MetricTier.high)),
       );
-      expect(find.text('Schedule consistency'), findsOneWidget);
+      expect(find.text('SCHEDULE CONSISTENCY'), findsOneWidget);
       expect(find.text('Which nights'), findsNothing);
     });
 

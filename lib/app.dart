@@ -28,6 +28,7 @@ import 'ui2/profile/alarm.dart';
 import 'ui2/profile/profile.dart';
 import 'ui2/screens/ai_briefing.dart';
 import 'ui2/screens/calm_breathing.dart';
+import 'ui2/screens/coach.dart';
 import 'ui2/screens/what_changed.dart';
 import 'ui2/screens/health_screen.dart';
 import 'ui2/screens/home_screen.dart';
@@ -129,7 +130,7 @@ class _OpenStrapAppState extends State<OpenStrapApp> with WidgetsBindingObserver
     final twelveHour = !context.watch<ClockFormatController>().resolve24h(
         MediaQuery.alwaysUse24HourFormatOf(context));
     return MaterialApp(
-      title: 'OpenStrap',
+      title: 'Edge',
       debugShowCheckedModeBanner: false,
       // The palette is the design system's, the CHOICE is still the user's.
       theme: buildTheme(Brightness.light),
@@ -334,7 +335,7 @@ class _InitFailed extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('OpenStrap could not start',
+                Text('WHOOP could not start',
                     style: F.t2.copyWith(color: p.ink)),
                 const SizedBox(height: 8),
                 Text(
@@ -593,6 +594,8 @@ class _ShellState extends State<_Shell> {
       key: ValueKey(_rev),
       initial: _domain,
       banner: live ? const _LiveSessionBar() : null,
+      onCoach: () => go(context,
+          coachReadyNow(context) ? const CoachScreen() : const CoachSetup()),
       onSelect: (d) {
         _domain = d;
         Prefs.setInt(Prefs.shellTabV2, d.index);

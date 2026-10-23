@@ -350,6 +350,31 @@ class _DayStepsDetailState extends State<DayStepsDetail> {
     return Surface(
       child: Column(
         children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text((l?.dayStepsCounted ?? 'Counted').toUpperCase(),
+                    style: F.over.copyWith(color: p.ink2, letterSpacing: 1.2)),
+                const SizedBox(height: S.x3),
+                Wrap(crossAxisAlignment: WrapCrossAlignment.end,
+                    spacing: S.x2, children: [
+                  Text(thousands(d.total), style: F.n64.copyWith(color: p.ink)),
+                  Padding(padding: const EdgeInsets.only(bottom: S.x2),
+                      child: Text(l?.dayStepsUnit ?? 'steps',
+                          style: F.cap.copyWith(color: p.ink3))),
+                ]),
+                if (!d.mixed) ...[
+                  const SizedBox(height: S.x2),
+                  Text(d.strap > 0 ? d.bandLabel
+                      : (l?.dayStepsYourPhone ?? 'Your phone'),
+                      style: F.cap.copyWith(color: p.ink3)),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: S.x6),
           ChartFrame(
             title: l?.dayStepsChartTitle ?? 'When they were counted',
             unit: l?.dayStepsUnit ?? 'steps',
@@ -390,24 +415,13 @@ class _DayStepsDetailState extends State<DayStepsDetail> {
               ],
             ),
           ),
-          const SizedBox(height: S.x4),
-          InlineMetrics(
-            d.mixed
-                ? [
-                    (l?.dayStepsCounted ?? 'Counted', thousands(d.total), C.green),
-                    (d.bandLabel, thousands(d.strap), C.green),
-                    (l?.dayStepsYourPhone ?? 'Your phone', thousands(d.phone), C.teal),
-                  ]
-                : [
-                    (
-                      d.strap > 0
-                          ? d.bandLabel
-                          : (l?.dayStepsYourPhone ?? 'Your phone'),
-                      thousands(d.total),
-                      d.strap > 0 ? C.green : C.teal,
-                    ),
-                  ],
-          ),
+          if (d.mixed) ...[
+            const SizedBox(height: S.x4),
+            InlineMetrics([
+              (d.bandLabel, thousands(d.strap), C.green),
+              (l?.dayStepsYourPhone ?? 'Your phone', thousands(d.phone), C.teal),
+            ]),
+          ],
         ],
       ),
     );

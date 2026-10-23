@@ -650,7 +650,7 @@ class LiveShellState extends State<LiveShell> {
                     height: 60,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                        color: p.fill(a.color), borderRadius: R.rLg),
+                        color: p.fill(C.domMove), borderRadius: R.rLg),
                     child: Icon(
                         paused ? LucideIcons.play : LucideIcons.pause,
                         size: 25,
@@ -715,8 +715,7 @@ class LiveTick extends StatelessWidget {
 
 // ══════════════ SHARED PIECES ══════════════
 
-/// The one big number. [F.n48] and no bigger — a display size that only
-/// exists on one screen is how seven type steps became forty.
+/// The session clock and entered totals use the shared numeral ramp.
 /// Speak a transition. A haptic reaches a wrist and nothing else — the two
 /// moments a paced session actually has to announce (rest is over, work
 /// begins) were buzz-only, so a screen-reader user driving an interval workout
@@ -730,42 +729,71 @@ void say(BuildContext c, String what) =>
 /// elapsed time is on the shell's own label; the moments worth hearing are
 /// announced explicitly (see [say]).
 Widget bigNum(P p, String v, String unit) => ExcludeSemantics(
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
-      children: [
-        Flexible(
-            child: Text(v,
-                style: F.n48.copyWith(color: p.ink),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis)),
-        if (unit.isNotEmpty) ...[
-          const SizedBox(width: S.x2),
-          Text(unit, style: F.t2.copyWith(color: p.ink3)),
-        ],
-      ],
-    ));
+      child: Builder(builder: (c) {
+        final number = FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(v, style: F.n64.copyWith(color: p.ink), maxLines: 1),
+        );
+        if (bigText(c)) {
+          return Column(children: [
+            number,
+            if (unit.isNotEmpty) ...[
+              const SizedBox(height: S.x2),
+              Text(unit, style: F.t2.copyWith(color: p.ink3)),
+            ],
+          ]);
+        }
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Flexible(child: number),
+            if (unit.isNotEmpty) ...[
+              const SizedBox(width: S.x2),
+              Text(unit, style: F.t2.copyWith(color: p.ink3)),
+            ],
+          ],
+        );
+      }),
+    );
 
 /// Up to three supporting numbers. A stat with nothing behind it is omitted,
 /// never rendered as a dash — and an entirely empty row is no row.
 Widget statRow(P p, List<(String, String)> items) => items.isEmpty
     ? const SizedBox.shrink()
-    : Row(
-      children: [
-        for (var i = 0; i < items.length; i++) ...[
-          if (i > 0) Container(width: 1, height: 36, color: p.line),
-          Expanded(
-            child: Column(children: [
-              Text(items[i].$1, style: F.n24.copyWith(color: p.ink)),
+    : Builder(
+        builder: (c) {
+          Widget item((String, String) v) => Column(
+            children: [
+              Text(v.$1, style: F.n24.copyWith(color: p.ink)),
               const SizedBox(height: S.x1),
-              Text(items[i].$2,
-                  style: F.over.copyWith(color: p.ink3),
-                  textAlign: TextAlign.center),
-            ]),
-          ),
-        ],
-      ],
+              Text(
+                v.$2,
+                style: F.over.copyWith(color: p.ink3),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          );
+          if (bigText(c)) {
+            return Column(
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0) const SizedBox(height: S.x4),
+                  item(items[i]),
+                ],
+              ],
+            );
+          }
+          return Row(
+            children: [
+              for (var i = 0; i < items.length; i++) ...[
+                if (i > 0) Container(width: 1, height: 36, color: p.line),
+                Expanded(child: item(items[i])),
+              ],
+            ],
+          );
+        },
       );
 
 Widget counterButton(P p, IconData i, Color col, String label,
@@ -825,14 +853,10 @@ class LiveHeart extends StatelessWidget {
         spacing: S.x2,
         runSpacing: S.x1,
         children: [
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(LucideIcons.heart, size: 18, color: p.on(C.red)),
-            const SizedBox(width: S.x2),
-            Text('${feed.hr}', style: F.n24.copyWith(color: p.ink)),
-            const SizedBox(width: S.x1),
-            Text(l?.activityLiveBpmUnit ?? 'bpm',
-                style: F.cap.copyWith(color: p.ink3)),
-          ]),
+          Icon(LucideIcons.heart, size: 18, color: p.on(C.red)),
+          Text('${feed.hr}', style: F.n48.copyWith(color: p.ink)),
+          Text(l?.activityLiveBpmUnit ?? 'bpm',
+              style: F.cap.copyWith(color: p.ink3)),
           if (z != null)
             // The zone's OWN colour, the one the bar underneath paints it in. A
             // fixed green said "zone 5" and "zone 1" in the same breath.
@@ -914,8 +938,14 @@ int? _kcal(Activity a, LiveFeed feed, double? weightKg, int elapsed) =>
 /// run a few metres of GPS jitter divided into real elapsed time reads as
 /// something like 1000 min/km, which [UnitsController.formatPace] refuses by
 /// returning null. A stat that has no value is not drawn.
-List<Widget> _distanceStats(BuildContext ctx, P p, LiveFeed f, Activity a,
-    double? weightKg, int elapsed) {
+List<Widget> _distanceStats(
+  BuildContext ctx,
+  P p,
+  LiveFeed f,
+  Activity a,
+  double? weightKg,
+  int elapsed,
+) {
   final u = unitsOf(ctx);
   final km = f.distanceKm;
   final meters = km == null ? null : km * 1000;
@@ -926,13 +956,25 @@ List<Widget> _distanceStats(BuildContext ctx, P p, LiveFeed f, Activity a,
   final pacePerUnit = (meters == null || meters <= 0)
       ? null
       : UnitsController.formatPace(
-          elapsed / (u == null ? meters / 1000 : u.distanceValue(meters)));
+          elapsed / (u == null ? meters / 1000 : u.distanceValue(meters)),
+        );
+  final l = AppLocalizations.of(ctx);
+  final movement = <(String, String)>[
+    if (value != null) (value.toStringAsFixed(2), unit),
+    if (pacePerUnit != null) (pacePerUnit, '/$unit'),
+    if (f.steps != null) ('${f.steps}', l?.activityLiveStepsUnit ?? 'steps'),
+  ];
+  final physiology = <(String, String)>[
+    if (f.avgHr != null) ('${f.avgHr}', uiText(ctx, 'Avg HR')),
+    if (f.maxHr != null) ('${f.maxHr}', uiText(ctx, 'Max HR')),
+    if (_kcal(a, f, weightKg, elapsed) case final kcal?)
+      ('$kcal', l?.activityLiveKcalEstUnit ?? 'kcal · est'),
+  ];
   return [
-    statRow(p, [
-      if (value != null) (value.toStringAsFixed(2), unit),
-      if (pacePerUnit != null) (pacePerUnit, '/$unit'),
-      ..._commonStats(ctx, a, f, weightKg, elapsed),
-    ].take(3).toList()),
+    if (movement.isNotEmpty) statRow(p, movement),
+    if (movement.isNotEmpty && physiology.isNotEmpty)
+      const SizedBox(height: S.x5),
+    if (physiology.isNotEmpty) statRow(p, physiology),
   ];
 }
 
@@ -1078,12 +1120,68 @@ class LiveMeasured extends StatelessWidget {
         final l = AppLocalizations.of(ctx);
         final f = feed?.call() ?? LiveFeed.none;
         return Column(children: [
-          const SizedBox(height: S.x6),
-          Text(l?.activityLiveDurationHeader ?? 'DURATION',
-              style: F.over.copyWith(color: p.ink3)),
-          const SizedBox(height: S.x3),
-          bigNum(p, clock(elapsed), ''),
-          // Only once fixes are actually arriving. The catalogue's `gps` flag
+            const SizedBox(height: S.x2),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: S.x3),
+              decoration: BoxDecoration(
+                color: p.fill(C.domMove),
+                borderRadius: R.rSm,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(LucideIcons.flag, size: 16, color: p.inkOnFill),
+                  const SizedBox(width: S.x2),
+                  Text(
+                    clock(elapsed),
+                    style: F.n24.copyWith(color: p.inkOnFill),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: S.x6),
+            SizedBox(
+              width: 256,
+              height: 256,
+              child: CustomPaint(
+                painter: Ring(
+                  f.strain == null ? 0 : f.strain! / 21,
+                  p.on(C.domMove),
+                  p.track,
+                  stroke: S.x3,
+                  solid: true,
+                ),
+                child: Center(
+                  child: Padding(
+                  padding: const EdgeInsets.all(S.x5),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          (l?.activityLiveStrainUnit ?? 'strain').toUpperCase(),
+                          style: F.over.copyWith(color: p.ink2),
+                        ),
+                        const SizedBox(height: S.x3),
+                        Text(
+                          f.strain?.toStringAsFixed(1) ??
+                              (l?.activityLiveNoneYet ?? 'None yet'),
+                          style: (f.strain == null ? F.t2 : F.hero).copyWith(
+                            color: p.ink,
+                          ),
+                        ),
+                        const SizedBox(height: S.x2),
+                        Text('0 – 21', style: F.over.copyWith(color: p.ink3)),
+                      ],
+                    ),
+                  )
+                ),
+                ),
+              ),
+            ),
+            // Only once fixes are actually arriving. The catalogue's `gps` flag
           // says a route is WORTH recording, not that one is being recorded —
           // it claimed "GPS ACTIVE" with location denied.
           if (f.gpsActive) ...[

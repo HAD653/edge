@@ -193,6 +193,8 @@ void main() {
 /// this list fails the test above, so the choice has to be made rather than
 /// drifted into.
 const _notComponents = {
+  // Ephemeral four-tab route; its reusable banner is in the gallery.
+  'DemoScreen',
   // shell and routing
   'AppShell', 'Domain', 'GalleryScreen',
   // WHOOP MG ECG routes: the Heart Screener entry reads the database and

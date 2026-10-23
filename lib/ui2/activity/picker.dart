@@ -106,7 +106,7 @@ class _ActivityPickerState extends State<ActivityPicker> {
                       autofocus: true,
                       onChanged: (v) => setState(() => q = v),
                       style: F.body.copyWith(color: p.ink),
-                      cursorColor: p.on(C.purple),
+                      cursorColor: p.on(C.domMove),
                       decoration: InputDecoration.collapsed(
                           hintText: l?.activityPickerSearchHint(
                                   allActivities.length) ??
@@ -285,7 +285,7 @@ class ActivityRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: S.x3),
         child: Row(
           children: [
-            Icon(a.icon, size: 18, color: p.on(a.color)),
+            Icon(a.icon, size: 18, color: p.ink),
             const SizedBox(width: S.x3),
             Expanded(
               child: Row(
@@ -342,14 +342,14 @@ class _Quick extends StatelessWidget {
       child: Container(
         width: 84,
         decoration: BoxDecoration(
-            color: p.card, borderRadius: R.rLg, boxShadow: p.el(1)),
+            color: p.card, borderRadius: R.rSm),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
             width: 38,
             height: 38,
             decoration:
-                BoxDecoration(color: p.wash(a.color), borderRadius: R.rMd),
-            child: Icon(a.icon, size: 18, color: p.on(a.color)),
+                BoxDecoration(color: p.card2, borderRadius: R.rSm),
+            child: Icon(a.icon, size: 18, color: p.ink),
           ),
             const SizedBox(height: S.x2),
             Padding(

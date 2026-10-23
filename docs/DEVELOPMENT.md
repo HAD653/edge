@@ -26,6 +26,25 @@ steps; see [guides/IOS_INSTALLATION.md](../guides/IOS_INSTALLATION.md). To sidel
 unsigned IPA instead of using TestFlight, see
 [guides/IOS_SIDELOAD.md](../guides/IOS_SIDELOAD.md).
 
+## Explore without a wearable
+
+On the welcome screen, choose **Explore demo** (French: **Explorer la démo**).
+This works in the iOS Simulator without pairing a band, granting health access,
+or configuring a backend. The four tabs show fictional recovery, sleep, activity,
+and health data, with 30 days of trends and an example run. The persistent banner
+lets you switch light/dark appearance locally or return to onboarding.
+
+Fixtures live in `lib/ui2/demo/demo_data.dart`; the preview navigation lives in
+`lib/ui2/demo/demo_screen.dart`. It reuses the app shell, cards, charts, and the
+recovery, metric, sleep, and activity detail screens. The demo overview pages are
+curated previews, not the full connected-device workflow. Detail screens use
+`readOnly: true` to remove edits, exports, and links into live data. The demo does
+not populate SQLite or complete onboarding, and its theme choice is not saved.
+
+```bash
+flutter test test/demo_mode_test.dart test/ui2_tokens_test.dart
+```
+
 ## Install channels
 
 - **iOS:** public TestFlight beta. TestFlight gets new builds first.

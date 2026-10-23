@@ -5,9 +5,9 @@
 // WAKE MINUTE), the zone minutes, and `max_hr_used` — the ceiling the pipeline
 // actually integrated against, printed rather than laundered into the score.
 //
-// The CURVE leads. The 0–21 is a summary of the curve, not the other way round:
-// two days can land on the same number with completely different shapes, and
-// the shape is the thing you can act on.
+// The 0–21 score leads, followed by its recorded curve. Two days can land on
+// the same number with completely different shapes, so the curve remains
+// visible and gaps in the recorded minutes stay gaps.
 //
 // What this screen deliberately does NOT draw:
 //   * CTL/ATL/TSB. That is a fortnight of history and it already has a card one
@@ -226,13 +226,72 @@ class _DayStrainDetailState extends State<DayStrainDetail> {
           const SizedBox(height: S.x8),
           const Center(child: CircularProgressIndicator()),
         ] else ...[
+        _score(p, l, d),
+        const SizedBox(height: S.x5),
           ..._trace(p, l, d),
           ..._zones(p, l, d),
           Section(l?.dayStrainInputsSection ?? 'What this is made of',
               _inputs(p, l, d)),
         ],
       ],
-      sub: sub,
+      sub: sub);
+  }
+
+  Widget _score(P p, AppLocalizations? l, DayStrainData d) {
+    final value = d.strain;
+    return Column(
+      children: [
+        if (value != null && d.hasCurve)
+          SizedBox(
+            width: 232,
+            height: 232,
+            child: CustomPaint(
+              painter: Ring(
+                value / 21,
+                p.on(C.domMove),
+                p.track,
+                stroke: S.x3,
+                solid: true,
+                t: animate(context, 1),
+              ),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(S.x5),
+                  child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        (l?.dayStrainTitle ?? 'Day strain').toUpperCase(),
+                        style: F.over.copyWith(color: p.ink3),
+                      ),
+                      const SizedBox(height: S.x3),
+                      Text(
+                        value.toStringAsFixed(1),
+                        style: F.hero.copyWith(color: p.ink),
+                      ),
+                      const SizedBox(height: S.x2),
+                      Text('0 – 21', style: F.over.copyWith(color: p.ink3)),
+                    ],
+                  ),
+                )
+                ),
+              ),
+            ),
+          ),
+        if (d.peakHr != null || d.wornMin != null) ...[
+          const SizedBox(height: S.x5),
+          Surface(
+            child: InlineMetrics([
+              if (d.peakHr != null)
+                (l?.dayStrainPeakHr ?? 'Peak HR', '${d.peakHr} bpm', C.red),
+              if (d.wornMin != null)
+                (l?.dayStrainWorn ?? 'Worn', '${d.wornMin} min', C.domMove),
+            ]),
+          ),
+        ],
+      ],
     );
   }
 
@@ -295,22 +354,10 @@ class _DayStrainDetailState extends State<DayStrainDetail> {
                 'Effort above your usual waking pace. It can ease later if you slow back toward that pace. From $drawn recorded waking minutes.',
             child: CustomPaint(
               size: Size.infinite,
-              painter: LineChart(d.curve, p.on(C.purple),
+              painter: LineChart(d.curve, p.on(C.domMove),
                   axis: axis, t: animate(context, 1)),
             ),
           ),
-          if (d.strain != null || d.peakHr != null || d.wornMin != null) ...[
-            const SizedBox(height: S.x4),
-            InlineMetrics([
-              if (d.strain != null)
-                (l?.dayStrainTitle ?? 'Day strain', d.strain!.toStringAsFixed(1),
-                    C.purple),
-              if (d.peakHr != null)
-                (l?.dayStrainPeakHr ?? 'Peak HR', '${d.peakHr} bpm', C.red),
-              if (d.wornMin != null)
-                (l?.dayStrainWorn ?? 'Worn', '${d.wornMin} min', C.teal),
-            ]),
-          ],
         ]),
       ),
       if (d.coveragePct != null && d.coveragePct! < _lowCoveragePct)

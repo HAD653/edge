@@ -106,6 +106,35 @@ void main() {
     expect(find.text('70'), findsOneWidget);
   });
 
+  testWidgets('past days show their rings without current-day monitors',
+      (t) async {
+    t.view.physicalSize = const Size(393 * 3, 1200 * 3);
+    t.view.devicePixelRatio = 3;
+    addTearDown(t.view.reset);
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    app.repo = _Repo();
+
+    await t.pumpWidget(MaterialApp(
+      theme: buildTheme(Brightness.dark),
+      home: ChangeNotifierProvider<AppState>.value(
+        value: app,
+        child: const Scaffold(body: HomeScreen(hour: 9)),
+      ),
+    ));
+    await _settle(t);
+    expect(find.text('HEALTH MONITOR'), findsOneWidget);
+    expect(find.text('STRESS MONITOR'), findsOneWidget);
+
+    await t.tap(find.bySemanticsLabel('Previous day'));
+    await _settle(t);
+    expect(find.byType(RingTrio), findsOneWidget);
+    expect(find.text('42'), findsOneWidget);
+    expect(find.text('HEALTH MONITOR'), findsNothing);
+    expect(find.text('STRESS MONITOR'), findsNothing);
+    expect(t.takeException(), isNull);
+  });
+
   testWidgets('on a past day the day breakdown opens THAT day', (t) async {
     final app = AppState.forTesting();
     addTearDown(app.dispose);

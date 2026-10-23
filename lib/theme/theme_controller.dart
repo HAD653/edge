@@ -4,9 +4,8 @@
 // before notifying) so the 546 `AppColors.x` call sites always resolve to the
 // mode being rendered, and it drives the system status-bar icon brightness.
 //
-// First launch follows the OS: if the phone is in dark mode, OpenStrap opens in
-// "Ember on Char" from the login/signup screen onward. The choice is persisted
-// and editable later from onboarding and Profile; UI updates live on change.
+// First launch uses the dark dashboard. An existing appearance preference is
+// retained, and the choice remains editable from onboarding and Profile.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -57,7 +56,8 @@ class ThemeController extends ChangeNotifier {
   static AppThemeChoice _parse(String? s) => switch (s) {
         'light' => AppThemeChoice.light,
         'dark' => AppThemeChoice.dark,
-        _ => AppThemeChoice.system,
+        'system' => AppThemeChoice.system,
+        _ => AppThemeChoice.dark,
       };
 
   AppThemeChoice get choice => _choice;

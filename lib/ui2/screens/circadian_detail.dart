@@ -364,13 +364,13 @@ class _CircadianDetailState extends State<CircadianDetail> {
               xLabels: d.labels.isEmpty
                   ? const []
                   : [d.labels.first, d.labels.last],
-              legend: [(l?.circadianDetailAsleep ?? 'Asleep', C.indigo)],
+              legend: [(l?.circadianDetailAsleep ?? 'Asleep', p.on(C.domSleep))],
               footnote: l?.circadianDetailSleepFootnote(drawn) ??
                   '$drawn night${drawn == 1 ? '' : 's'}, one column each, '
                       'darker where more of that hour was asleep.',
               child: CustomPaint(
                 size: Size.infinite,
-                painter: Actogram(d.actogram, p.on(C.indigo)),
+                painter: Actogram(d.actogram, p.on(C.domSleep)),
               ),
             ),
           ),
@@ -565,11 +565,15 @@ class _CircadianDetailState extends State<CircadianDetail> {
       if (d.chronotypeLabel.isNotEmpty)
         (l?.circadianDetailChronotype ?? 'Natural bedtime', d.chronotypeLabel),
       if (d.midFreeH != null)
-        (l?.circadianDetailMidSleepFree ?? 'Mid-sleep, free days',
-            _hourClock(d.midFreeH)),
+        (
+          l?.circadianDetailMidSleepFree ?? 'Mid-sleep, free days',
+          _hourClock(d.midFreeH),
+        ),
       if (d.midWorkH != null)
-        (l?.circadianDetailMidSleepWork ?? 'Mid-sleep, working days',
-            _hourClock(d.midWorkH)),
+        (
+          l?.circadianDetailMidSleepWork ?? 'Mid-sleep, working days',
+          _hourClock(d.midWorkH),
+        ),
       // `abs_hours` is UNSIGNED. Whether the free-day clock runs later or
       // earlier is the sign of free minus work; the card that used to say
       // "later" read it off the magnitude.
@@ -580,47 +584,128 @@ class _CircadianDetailState extends State<CircadianDetail> {
               '${d.midFreeH == null || d.midWorkH == null ? '' : (d.midFreeH! >= d.midWorkH! ? ' ${l?.circadianDetailLater ?? 'later'}' : ' ${l?.circadianDetailEarlier ?? 'earlier'}')}',
         ),
       if (d.nFree != null && d.nWork != null)
-        (l?.circadianDetailNightsCompared ?? 'Free / working nights compared',
-            '${d.nFree!.round()} / ${d.nWork!.round()}'),
-      if (d.regularity.value != null)
-        (l?.circadianDetailRegularityIndex ?? 'Schedule consistency',
-            '${d.regularity.value!.round()} / 100'),
+        (
+          l?.circadianDetailNightsCompared ?? 'Free / working nights compared',
+          '${d.nFree!.round()} / ${d.nWork!.round()}',
+        ),
       // SLP-08 — the same arithmetic, one level down. The index above is the
       // average agreement across every adjacent pair of nights; these two rows
       // name the pair that agreed least and print it on the same scale.
       if (showNights)
-        (l?.circadianDetailNightsLeastAlike ?? 'Nights least alike',
-            '${_shortDay(worst['prev_date'])} → ${_shortDay(worst['date'])}'),
+        (
+          l?.circadianDetailNightsLeastAlike ?? 'Nights least alike',
+          '${_shortDay(worst['prev_date'])} → ${_shortDay(worst['date'])}',
+        ),
       if (showNights)
-        (l?.circadianDetailSamePairScale ?? 'That pair, same scale',
-            '${(worst['sri'] as num).round()} / 100'),
+        (
+          l?.circadianDetailSamePairScale ?? 'That pair, same scale',
+          '${(worst['sri'] as num).round()} / 100',
+        ),
     ];
 
-    if (rows.isEmpty) {
+    if (rows.isEmpty && d.regularity.value == null) {
       // No `why:`. "Takes a few weeks of both" is one reason SRI abstains and
       // it is not the one the measured run hit — `no valid epoch pairs` was,
       // on both gen5 databases, and that note was being overwritten here.
       return StatusCard.forMetric(
-              l?.circadianDetailRhythmNotEstablished ??
-                  'Your rhythm is not established yet',
-              d.regularity) ??
+            l?.circadianDetailRhythmNotEstablished ??
+                'Your rhythm is not established yet',
+            d.regularity,
+          ) ??
           const SizedBox.shrink();
     }
 
-    if (!showNights) return _table(p, rows);
+    final summary = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (d.regularity.value case final value?) ...[
+          _consistency(c, p, value.toDouble()),
+          if (rows.isNotEmpty) const SizedBox(height: S.x3),
+        ],
+        if (rows.isNotEmpty) _table(p, rows),
+      ],
+    );
+    if (!showNights) return summary;
     // The caption is not decoration. SRI's evidence is a population-level
     // mortality association; it does not license telling one person that their
     // Saturday is harming them, and two dates in a table are exactly the shape
     // that gets read as a verdict unless the card says otherwise.
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      _table(p, rows),
-      const SizedBox(height: S.x3),
-      Text(
-        l?.circadianDetailPairFootnote(d.sriPairs.length) ??
-            'The least alike pair, out of ${d.sriPairs.length}. A late weekend is a different schedule, not a worse night. Days with too little recording are left out.',
-        style: F.over.copyWith(color: p.ink3, height: 1.5),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        summary,
+        const SizedBox(height: S.x3),
+        Text(
+          l?.circadianDetailPairFootnote(d.sriPairs.length) ??
+              'The least alike pair, out of ${d.sriPairs.length}. A late weekend is a different schedule, not a worse night. Days with too little recording are left out.',
+          style: F.over.copyWith(color: p.ink3, height: 1.5),
+        ),
+      ],
+    );
+  }
+
+  Widget _consistency(BuildContext c, P p, double value) {
+    final l = AppLocalizations.of(c);
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(LucideIcons.calendarClock, size: S.x6, color: p.on(C.domSleep)),
+        const SizedBox(height: S.x3),
+        Text('${value.round()}', style: F.n72.copyWith(color: p.ink)),
+        const SizedBox(height: S.x1),
+        Text('−100 … 100', style: F.over.copyWith(color: p.ink3)),
+        const SizedBox(height: S.x2),
+        Text(
+          (l?.circadianDetailRegularityIndex ?? 'Schedule consistency')
+              .toUpperCase(),
+          textAlign: TextAlign.center,
+          style: F.section.copyWith(color: p.ink2),
+        ),
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: S.x4),
+      child: Center(
+        child: LayoutBuilder(
+          builder: (c, box) {
+            if (bigText(c)) return content;
+            return SizedBox(
+              width: box.maxWidth.clamp(0.0, S.x16 * 4),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: box.maxWidth.clamp(0.0, S.x16 * 4),
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Positioned.fill(
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          painter: Ring(
+                            // The persisted SRI spans -100 to 100; zero is
+                            // agreement at chance, not an empty measurement.
+                            ((value + 100) / 200).clamp(0, 1),
+                            p.on(C.domSleep),
+                            p.track,
+                            stroke: S.x3,
+                            solid: true,
+                            t: animate(c, 1),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(S.x8),
+                      child: content,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
       ),
-    ]);
+    );
   }
 
   /// The non-parametric battery and the cosinor fit, with what they were
@@ -690,16 +775,21 @@ class _CircadianDetailState extends State<CircadianDetail> {
   }
 
   Widget _table(P p, List<(String, String)> rows) => Surface(
-        pad: const EdgeInsets.symmetric(horizontal: S.x4),
-        child: Column(children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            if (i > 0) Divider(color: p.line, height: 1),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: S.x3),
-              child: Row(children: [
+    pad: const EdgeInsets.symmetric(horizontal: S.x4),
+    child: Column(
+      children: [
+        for (var i = 0; i < rows.length; i++) ...[
+          if (i > 0) Divider(color: p.line, height: 1),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: S.x3),
+            child: Row(
+              children: [
                 Expanded(
-                    child:
-                        Text(rows[i].$1, style: F.body.copyWith(color: p.ink))),
+                  child: Text(
+                    rows[i].$1.toUpperCase(),
+                    style: F.section.copyWith(color: p.ink2),
+                  ),
+                ),
                 const SizedBox(width: S.x3),
                 // Flexible, like every other two-column row in the app: at 3.1x
                 // text the label wraps inside its Expanded and the value's
@@ -708,14 +798,17 @@ class _CircadianDetailState extends State<CircadianDetail> {
                 // index / 62 / 100" is enough on its own — so it is not the
                 // SLP-08 rows that need it, it is the table.
                 Flexible(
-                  child: Text(rows[i].$2,
-                      textAlign: TextAlign.right,
-                      style: F.body
-                          .copyWith(color: p.ink2, fontWeight: FontWeight.w600)),
+                  child: Text(
+                    rows[i].$2,
+                    textAlign: TextAlign.right,
+                    style: F.n24.copyWith(color: p.ink),
+                  ),
                 ),
-              ]),
+              ],
             ),
-          ],
-        ]),
-      );
+          ),
+        ],
+      ],
+    ),
+  );
 }

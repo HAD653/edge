@@ -143,7 +143,7 @@ struct WatchGlanceView: View {
       Text(m.hasData ? "No recent data" : "No data yet")
         .font(.system(size: 16, weight: .semibold, design: .rounded))
         .foregroundStyle(p.ink)
-      Text("Open OpenStrap on your iPhone and sync your band.")
+      Text("Open WHOOP on your iPhone and sync your band.")
         .font(.system(size: 12))
         .multilineTextAlignment(.center)
         .foregroundStyle(p.inkSoft)

@@ -250,8 +250,8 @@ class Surface extends StatelessWidget {
         padding: pad,
         decoration: BoxDecoration(
           color: color ?? p.card,
-          borderRadius: R.rLg,
-          boxShadow: p.el(elevation),
+          borderRadius: p.dark ? R.rSm : R.rLg,
+          boxShadow: p.el(p.dark ? 0 : elevation),
         ),
         child: child,
       ),
@@ -297,7 +297,7 @@ class Section extends StatelessWidget {
               Flexible(
                 child: Text(
                   title,
-                  style: F.head.copyWith(color: p.ink),
+                  style: (p.dark ? F.section : F.head).copyWith(color: p.ink),
                   maxLines: wrapTitle ? null : 2,
                   overflow: wrapTitle
                       ? TextOverflow.visible
@@ -372,7 +372,7 @@ class SignalCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: F.cap.copyWith(color: p.ink2),
+                  style: (p.dark ? F.section : F.cap).copyWith(color: p.ink2),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -610,8 +610,8 @@ class _TrendCardState extends State<TrendCard> {
     final judgement = band != null
         ? '${usualWord(l, side!)}, $verdictDetail'
         : (j == null
-            ? ''
-            : uiText(c, j ? 'an improvement' : 'worse than usual'));
+              ? ''
+              : uiText(c, j ? 'an improvement' : 'worse than usual'));
     final change = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -630,8 +630,9 @@ class _TrendCardState extends State<TrendCard> {
       ],
     );
     final held = _held;
-    final heldValue =
-        held == null || held >= w.series.length ? null : w.series[held];
+    final heldValue = held == null || held >= w.series.length
+        ? null
+        : w.series[held];
     final small = held == null || w.dayOf == null
         ? w.window
         : '${w.dayOf!(held)} · ${heldValue == null ? (l?.metricDetailNoRecordLabel ?? 'No record') : '${_fmt(heldValue)}$u'}';
@@ -642,23 +643,29 @@ class _TrendCardState extends State<TrendCard> {
     ];
     final axis = band?.axis(vals, format: _fmt);
     final ink = p.on(w.color);
-    Widget plot = Stack(fit: StackFit.expand, children: [
-      if (band != null && axis != null)
-        BandLayer(band, axis, p.wash(w.color)),
-      CustomPaint(
-        size: Size.infinite,
-        // No `dotInk` when there is no band: `dots` is off then, and the
-        // knockout colour is only ever read inside the head-dot branch.
-        painter: LineChart(w.series, ink,
+    Widget plot = Stack(
+      fit: StackFit.expand,
+      children: [
+        if (band != null && axis != null)
+          BandLayer(band, axis, p.wash(w.color)),
+        CustomPaint(
+          size: Size.infinite,
+          // No `dotInk` when there is no band: `dots` is off then, and the
+          // knockout colour is only ever read inside the head-dot branch.
+          painter: LineChart(
+            w.series,
+            ink,
             fill: false,
             dots: band != null,
             dotInk: p.card,
             axis: axis,
             selectedX: held == null || w.series.length < 2
                 ? null
-                : held / (w.series.length - 1)),
-      ),
-    ]);
+                : held / (w.series.length - 1),
+          ),
+        ),
+      ],
+    );
     if (w.dayOf != null && w.series.length > 1) {
       // Excluded from semantics: the card's own label carries the summary and
       // the card is a button into the metric screen, whose chart is the
@@ -670,8 +677,8 @@ class _TrendCardState extends State<TrendCard> {
           step: 1 / (w.series.length - 1),
           label: w.label,
           describe: (v) => '',
-          onChanged: (v) => setState(
-              () => _held = (v * (w.series.length - 1)).round()),
+          onChanged: (v) =>
+              setState(() => _held = (v * (w.series.length - 1)).round()),
           onEnd: () => setState(() => _held = null),
           child: plot,
         ),
@@ -686,7 +693,10 @@ class _TrendCardState extends State<TrendCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(w.label, style: F.cap.copyWith(color: p.ink2)),
+          Text(
+            w.label,
+            style: (p.dark ? F.section : F.cap).copyWith(color: p.ink2),
+          ),
           const SizedBox(height: S.x2),
           // A realistic value — `7h 42m`, not the two characters the golden used
           // to pass on — pushed the delta and its arrow clean off the card: 202 px
@@ -1093,11 +1103,11 @@ class StatusCard extends StatelessWidget {
       told != null
           ? (gap == null ? told : '$told $gap')
           : gap ??
-              (why.isNotEmpty
-                  ? why
-                  : need != null
-                      ? 'Not enough history yet to know what normal looks like for you.'
-                      : 'Nothing recorded says why this is missing.'),
+                (why.isNotEmpty
+                    ? why
+                    : need != null
+                    ? 'Not enough history yet to know what normal looks like for you.'
+                    : 'Nothing recorded says why this is missing.'),
       fix: need ?? '',
       onFix: onFix,
     );
@@ -1282,12 +1292,15 @@ Trend? trendOf(List<double?> series) {
       l.fold<double>(0, (a, b) => a + b) / l.length;
   final recent = v.sublist(v.length - recentN);
   final base = v.sublist(
-      math.max(0, v.length - recentN - baseMax), v.length - recentN);
+    math.max(0, v.length - recentN - baseMax),
+    v.length - recentN,
+  );
   final mb = mean(base);
   final delta = mean(recent) - mb;
   final sd = math.sqrt(
-      base.map((x) => (x - mb) * (x - mb)).fold<double>(0, (a, b) => a + b) /
-          (base.length - 1));
+    base.map((x) => (x - mb) * (x - mb)).fold<double>(0, (a, b) => a + b) /
+        (base.length - 1),
+  );
   if (delta.abs() <= 0.5 * sd) return Trend.steady;
   return delta > 0 ? Trend.rising : Trend.falling;
 }
@@ -1305,11 +1318,11 @@ Color _trendHue(P p, Trend trend, Rising rising) {
 /// What the arrow says, in words, for the screen reader — including the case
 /// where there is no arrow, so an empty slot is not a silent hole.
 String _trendWord(Trend? t) => switch (t) {
-      Trend.rising => 'trending up',
-      Trend.falling => 'trending down',
-      Trend.steady => 'steady',
-      null => 'no trend yet, not enough days recorded',
-    };
+  Trend.rising => 'trending up',
+  Trend.falling => 'trending down',
+  Trend.steady => 'steady',
+  null => 'no trend yet, not enough days recorded',
+};
 
 /// A metric in a list: name → value → trend.
 class MetricRow extends StatelessWidget {
@@ -1731,8 +1744,14 @@ class Consistency extends StatelessWidget {
   /// and drew one segment per day, so 10 of 14 doses read as 10 of 14 days.
   final String unit;
 
-  const Consistency(this.have, this.of, this.label, this.color,
-      {super.key, this.unit = 'days'});
+  const Consistency(
+    this.have,
+    this.of,
+    this.label,
+    this.color, {
+    super.key,
+    this.unit = 'days',
+  });
 
   @override
   Widget build(BuildContext c) {
@@ -1823,9 +1842,7 @@ void sayUnreadable(BuildContext c, List<String> fields) {
     SnackBar(
       content: Text(
         fields.length == 1
-            ? AppLocalizations.of(
-                    c,
-                  )?.supplementUnreadableField(fields.first) ??
+            ? AppLocalizations.of(c)?.supplementUnreadableField(fields.first) ??
                   '${fields.first} is not a number. Nothing was saved.'
             : AppLocalizations.of(
                     c,
@@ -2009,20 +2026,20 @@ class _SubTabsState extends State<SubTabs> {
                           // the active pill and the empty ground of a live one, and
                           // `ink3` is solved for 4.5:1 ON `card2` (see theme.dart), so
                           // this cue costs no contrast the way dimming would.
-                  color: off
-                      ? p.card2
-                      : on
-                          ? p.wash(color)
-                          : const Color(0x00000000),
-                  borderRadius: R.rPill,
-                ),
-                child: Text(
-                  items[i],
-                  style: F.cap.copyWith(
-                    color: on ? p.on(color) : p.ink3,
-                    fontWeight: on ? FontWeight.w600 : FontWeight.w500,
-                  ),
-                ),
+                          color: off
+                              ? p.card2
+                              : on
+                              ? (p.dark ? p.card2 : p.wash(color))
+                              : const Color(0x00000000),
+                          borderRadius: p.dark ? R.rSm : R.rPill,
+                        ),
+                        child: Text(
+                          items[i],
+                          style: F.cap.copyWith(
+                            color: on ? p.ink : p.ink3,
+                            fontWeight: on ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -2051,7 +2068,7 @@ class ScreenTitle extends StatelessWidget {
           Expanded(
             child: Text(
               title,
-              style: F.t1.copyWith(color: p.ink),
+              style: (p.dark ? F.title : F.t1).copyWith(color: p.ink),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -2136,16 +2153,17 @@ class BigButton extends StatelessWidget {
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: soft ? p.wash(color) : p.fill(color),
-          borderRadius: R.rMd,
-          boxShadow: soft ? null : p.el(2),
+          borderRadius: p.dark ? R.rSm : R.rMd,
+          boxShadow: soft || p.dark ? null : p.el(2),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (busy) ...[
               SizedBox.square(
-                  dimension: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: ink)),
+                dimension: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: ink),
+              ),
               const SizedBox(width: S.x2),
             ] else if (icon != null) ...[
               Icon(icon, size: 18, color: ink),
@@ -2154,7 +2172,7 @@ class BigButton extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                style: F.head.copyWith(color: ink),
+                style: (p.dark ? F.section : F.head).copyWith(color: ink),
                 textAlign: TextAlign.center,
                 maxLines: 2,
               ),
@@ -2332,7 +2350,7 @@ class ChartFrame extends StatelessWidget {
                     v.length,
                   ) ??
                   '${delta > 0 ? 'up' : 'down'} ${fmt(delta.abs())} '
-                  'across ${v.length} readings',
+                      'across ${v.length} readings',
       );
     }
     return parts.join(', ');
@@ -2341,7 +2359,10 @@ class ChartFrame extends StatelessWidget {
   Widget _header(BuildContext c, P p, bool stacked) {
     final name = Text(
       title,
-      style: F.cap.copyWith(color: p.ink, fontWeight: FontWeight.w600),
+      style: (p.dark ? F.section : F.cap).copyWith(
+        color: p.ink,
+        fontWeight: FontWeight.w600,
+      ),
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
     );
@@ -2609,9 +2630,13 @@ class ChartFrame extends StatelessWidget {
                               usualRangeText(
                                 AppLocalizations.of(c),
                                 presentationText(
-                                    AppLocalizations.of(c), a.format(band!.lo)),
+                                  AppLocalizations.of(c),
+                                  a.format(band!.lo),
+                                ),
                                 presentationText(
-                                    AppLocalizations.of(c), a.format(band!.hi)),
+                                  AppLocalizations.of(c),
+                                  a.format(band!.hi),
+                                ),
                                 '',
                               ),
                               style: tick,
@@ -2756,7 +2781,7 @@ class NavBar extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: F.head.copyWith(color: p.ink),
+                  style: (p.dark ? F.section : F.head).copyWith(color: p.ink),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),

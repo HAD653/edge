@@ -12,6 +12,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -26,9 +27,19 @@ import 'package:openstrap_edge/ui2/ui2.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUpAll(() {
+  late String dbPath;
+  setUpAll(() async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+    // Other suites also write vitamin_d; never share their physical database.
+    await LocalDb.close();
+    LocalDb.dbName = 'ui2_wellness_meds_not_due_test.db';
+    dbPath = path.join(await databaseFactory.getDatabasesPath(), LocalDb.dbName);
+    await databaseFactory.deleteDatabase(dbPath);
+  });
+  tearDownAll(() async {
+    await LocalDb.close();
+    await databaseFactory.deleteDatabase(dbPath);
   });
   setUp(() {
     SharedPreferences.setMockInitialValues({});

@@ -788,7 +788,7 @@ class DayEnergyCard extends StatelessWidget {
                 k.value == null
                     ? day.entries.length.toString()
                     : k.value!.round().toString(),
-                style: F.n34.copyWith(color: p.ink),
+                style: F.n64.copyWith(color: p.ink),
               ),
               Text(
                 k.value == null

@@ -263,7 +263,8 @@ class _JournalComposeState extends State<JournalCompose> {
                         Section(
                           l?.journalComposeTodaySection ?? 'Today',
                           Surface(
-                            pad: const EdgeInsets.symmetric(horizontal: S.x4),
+                            color: p.bg,
+                            pad: EdgeInsets.zero,
                             child: Column(
                               children: [
                                 for (final s in _specs.where(
@@ -374,18 +375,23 @@ class _JournalComposeState extends State<JournalCompose> {
                               'A line about the day.',
                           lines: 4,
                         ),
-                        const SizedBox(height: S.x6),
-                        BigButton(
-                          _saving
-                              ? (l?.journalComposeSavingLabel ?? 'Saving')
-                              : (l?.actionSave ?? 'Save'),
-                          icon: LucideIcons.check,
-                          color: C.domMind,
-                          onTap: _saving ? null : _save,
-                        ),
                       ],
                     ),
             ),
+            if (!_loading)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(S.x4, S.x3, S.x4, S.x4),
+                child: BigButton(
+                  _saving
+                      ? (l?.journalComposeSavingLabel ?? 'Saving')
+                      : (p.dark
+                          ? (l?.actionSave ?? 'Save').toUpperCase()
+                          : (l?.actionSave ?? 'Save')),
+                  icon: LucideIcons.check,
+                  color: C.domMind,
+                  onTap: _saving ? null : _save,
+                ),
+              ),
           ],
         ),
       ),
@@ -462,15 +468,15 @@ class MoodPicker extends StatelessWidget {
                       // centres the face.
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        borderRadius: R.rMd,
+                        borderRadius: R.rSm,
                         color: value == i + 1
                             ? p.fill(_tints[i])
-                            : p.wash(_tints[i]),
+                            : p.card2,
                       ),
                       child: Icon(
                         _faces[i],
                         size: 22,
-                        color: value == i + 1 ? p.inkOnFill : p.on(_tints[i]),
+                        color: value == i + 1 ? p.inkOnFill : p.ink2,
                       ),
                     ),
                   ),
@@ -516,8 +522,10 @@ class FieldStepper extends StatelessWidget {
     final p = P.of(c);
     final l = AppLocalizations.of(c);
     final v = value;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: S.x2),
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: S.x1),
+      padding: const EdgeInsets.symmetric(horizontal: S.x3, vertical: S.x2),
+      decoration: BoxDecoration(color: p.card2, borderRadius: R.rSm),
       child: Row(
         children: [
           Expanded(

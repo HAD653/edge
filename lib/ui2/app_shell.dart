@@ -11,6 +11,8 @@
 // a screen can do on its own. Anything that feels like another destination is
 // a section or a pushed screen inside the domain that owns it.
 
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -71,12 +73,17 @@ class AppShell extends StatefulWidget {
   /// belongs inside the domain.
   final Widget? banner;
 
+  /// A persistent shortcut into the existing coach, beside the four tabs.
+  /// Omitted in service-free previews and when the caller has no coach flow.
+  final VoidCallback? onCoach;
+
   const AppShell({
     super.key,
     required this.builder,
     this.initial = ShellDomain.today,
     this.onSelect,
     this.banner,
+    this.onCoach,
   });
 
   @override
@@ -134,29 +141,43 @@ class _AppShellState extends State<AppShell> {
       },
       child: Scaffold(
         backgroundColor: p.bg,
-        body: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              Expanded(
-                child: IndexedStack(
-                  index: _current.index,
-                  children: [
-                    // An unvisited tab is an empty box, not a built screen — the
-                    // old shell built all forty screens' worth of state on launch.
-                    for (final d in ShellDomain.values)
-                      if (_built.contains(d))
-                        widget.builder(c, d)
-                      else
-                        const SizedBox.shrink(),
-                  ],
+        body: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0, .55, 1],
+              colors: [p.atmosphere, p.bg, p.bg],
+            ),
+          ),
+          child: SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                Expanded(
+                  child: IndexedStack(
+                    index: _current.index,
+                    children: [
+                      // An unvisited tab is an empty box, not a built screen — the
+                      // old shell built all forty screens' worth of state on launch.
+                      for (final d in ShellDomain.values)
+                        if (_built.contains(d))
+                          widget.builder(c, d)
+                        else
+                          const SizedBox.shrink(),
+                    ],
+                  ),
                 ),
-              ),
-              if (widget.banner != null) widget.banner!,
-            ],
+                if (widget.banner != null) widget.banner!,
+              ],
+            ),
           ),
         ),
-        bottomNavigationBar: _TabBar(current: _current, onTap: _select),
+        bottomNavigationBar: _TabBar(
+          current: _current,
+          onTap: _select,
+          onCoach: widget.onCoach,
+        ),
       ),
     );
   }
@@ -165,33 +186,74 @@ class _AppShellState extends State<AppShell> {
 class _TabBar extends StatelessWidget {
   final ShellDomain current;
   final ValueChanged<ShellDomain> onTap;
+  final VoidCallback? onCoach;
 
-  const _TabBar({required this.current, required this.onTap});
+  const _TabBar({required this.current, required this.onTap, this.onCoach});
 
   @override
   Widget build(BuildContext c) {
     final p = P.of(c);
-    return Container(
-      decoration: BoxDecoration(
-        color: p.card,
-        border: Border(top: BorderSide(color: p.line)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final d in ShellDomain.values)
-                Expanded(
-                  child: _Tab(
-                    domain: d,
-                    on: d == current,
-                    onTap: () => onTap(d),
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(S.x3, S.x2, S.x3, S.x2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: R.rXl,
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: p.card2.withValues(alpha: .94),
+                      borderRadius: R.rXl,
+                      border: Border.all(color: p.line.withValues(alpha: .55)),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: S.x1),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final d in ShellDomain.values)
+                            Expanded(
+                              child: _Tab(
+                                domain: d,
+                                on: d == current,
+                                onTap: () => onTap(d),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
+              ),
+            ),
+            if (onCoach != null) ...[
+              const SizedBox(width: S.x2),
+              Pressable(
+                onTap: onCoach,
+                semanticLabel: AppLocalizations.of(c)?.coachNavTitle ?? 'Coach',
+                child: SizedBox(
+                  width: 56,
+                  height: 64,
+                  child: Center(
+                    child: Image.asset(
+                      'assets/images/whoop_logo.png',
+                      width: 46,
+                      height: 46,
+                      color: p.ink,
+                      colorBlendMode: BlendMode.srcIn,
+                      filterQuality: FilterQuality.high,
+                      excludeFromSemantics: true,
+                    ),
+                  ),
+                ),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -208,7 +270,7 @@ class _Tab extends StatelessWidget {
   @override
   Widget build(BuildContext c) {
     final p = P.of(c);
-    final ink = on ? p.on(domain.accent) : p.ink3;
+    final ink = on ? p.ink : p.ink3;
     final label = domain.title(c);
     return Semantics(
       selected: on,
@@ -220,26 +282,23 @@ class _Tab extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-            AnimatedContainer(
-              duration: motion(c, Motion.base),
-              padding: EdgeInsets.symmetric(
-                horizontal: on ? S.x3 : 0,
-                vertical: S.x1,
+              AnimatedContainer(
+                duration: motion(c, Motion.base),
+                padding: EdgeInsets.symmetric(horizontal: S.x3, vertical: S.x1),
+                decoration: BoxDecoration(
+                  color: const Color(0x00000000),
+                  borderRadius: R.rPill,
+                ),
+                child: Icon(domain.icon, size: 20, color: ink),
               ),
-              decoration: BoxDecoration(
-                color: on ? p.wash(domain.accent) : const Color(0x00000000),
-                borderRadius: R.rPill,
-              ),
-              child: Icon(domain.icon, size: 20, color: ink),
-            ),
               const SizedBox(height: 3),
               Text(
                 label,
                 textAlign: TextAlign.center,
-              style: F.over.copyWith(
-                color: ink,
-                fontWeight: on ? FontWeight.w600 : FontWeight.w500,
-              ),
+                style: F.over.copyWith(
+                  color: ink,
+                  fontWeight: on ? FontWeight.w600 : FontWeight.w500,
+                ),
               ),
             ],
           ),

@@ -63,6 +63,7 @@ import '../../state/clock_format.dart' show formatClockOf;
 import '../../state/units_controller.dart';
 import '../../theme/theme_switcher.dart' show themedRoute;
 import '../activity/day_strain.dart' show DayStrainDetail;
+import '../activity/picker.dart' show ActivityPicker;
 import '../profile/alarm.dart'
     show AlarmArmState, alarmArmOf, alarmDoor, alarmGlanceCard;
 import '../profile/devices.dart' show formatDayTime;
@@ -73,10 +74,13 @@ import '../ui2.dart';
 import 'ai_briefing.dart' show AiBriefingScreen;
 import 'coach.dart';
 import 'detected_activities.dart';
+import 'health_screen.dart' show HealthScreen;
 import 'day_timeline.dart' show DayTimelineScreen;
 import 'metric_detail.dart';
 import 'readiness_detail.dart';
 import 'sleep_detail.dart';
+import 'log_workout.dart' show LogWorkout;
+import 'workout_screen.dart' show activityHost;
 
 // ═══════════════════ shared plumbing ═══════════════════
 
@@ -833,7 +837,11 @@ class RingTrio extends StatelessWidget {
   Widget build(BuildContext c) {
     final p = P.of(c);
     final l = AppLocalizations.of(c);
-    final rings = [for (final k in HomeRingKind.values) _ringOf(k, d, l)];
+    final rings = [for (final k in const [
+        HomeRingKind.sleep,
+        HomeRingKind.recovery,
+        HomeRingKind.strain,
+      ]) _ringOf(k, d, l)];
     final gaps = rings.where((r) => r.why != null).toList();
     // THERE IS NO "THESE TWO ARE FROM SATURDAY" LINE ANY MORE, and there is
     // nothing left for one to explain. Recovery and sleep used to be served
@@ -844,9 +852,7 @@ class RingTrio extends StatelessWidget {
     // ([overnightMetric]), so a ring with no night behind it is a gap row with
     // the reason in it — same place every other absence on this screen goes.
 
-    return Surface(
-      elevation: 2,
-      child: Column(children: [
+    return Column(children: [
         if (bigText(c))
           // Past ~1.3× a 100 pt column cannot hold the word "Recovery" on one
           // line and there is nowhere for it to wrap to. The ring keeps its
@@ -876,10 +882,10 @@ class RingTrio extends StatelessWidget {
           Text(note, style: F.cap.copyWith(color: p.ink3)),
         ],
         if (d.readiness.value != null && d.drivers.isNotEmpty) ...[
-          const SizedBox(height: S.x3),
-          Divider(color: p.line, height: 1),
-          const SizedBox(height: S.x3),
-          Pressable(
+          const SizedBox(height: S.x6),
+          Surface(
+            pad: const EdgeInsets.all(S.x4),
+            child: Pressable(
             onTap: _open(HomeRingKind.recovery),
             // Top-aligned: at an accessibility size the driver list is three
             // lines and "Why?" was centred against the middle of them.
@@ -898,9 +904,9 @@ class RingTrio extends StatelessWidget {
               Icon(LucideIcons.chevronRight, size: 15, color: p.ink3),
             ]),
             ),
+            ),
           ],
         ],
-      ),
     );
   }
 
@@ -941,7 +947,7 @@ enum HomeRingKind { recovery, strain, sleep }
 /// One ring's resolved state — the only place a metric becomes a shape.
 class _RingState {
   final HomeRingKind kind;
-  final String label, value, sub;
+  final String label, value, sub, spokenDetail;
   final IconData icon;
   final Color color;
 
@@ -967,6 +973,7 @@ class _RingState {
     this.color, {
     required this.value,
     this.sub = '',
+    this.spokenDetail = '',
     this.frac,
     this.calibrating = false,
     this.have,
@@ -989,6 +996,7 @@ class _RingState {
         label,
         measured ? value : value.toLowerCase(),
         if (sub.isNotEmpty) sub,
+        if (spokenDetail.isNotEmpty) spokenDetail,
         ?why,
       ].join('. ');
 }
@@ -1039,25 +1047,29 @@ _RingState _ringOf(HomeRingKind k, HomeData d, AppLocalizations? l) {
       final v = d.strain.value;
       // 0–21 is the scale's own ceiling, not a target invented here.
       return v == null
-          ? _gap(k, l?.homeRingStrain ?? 'Strain', LucideIcons.zap, C.purple,
+          ? _gap(k, l?.homeRingStrain ?? 'Strain', LucideIcons.zap, C.strain,
               d.strain, l?.homeRingNoStrain ?? 'No strain', l, unit: 'days')
-          : _RingState(k, l?.homeRingStrain ?? 'Strain', LucideIcons.zap, C.purple,
+          : _RingState(k, l?.homeRingStrain ?? 'Strain', LucideIcons.zap, C.strain,
               value: v.toStringAsFixed(1), sub: l?.homeStrainOf21 ?? 'of 21', frac: v / 21);
     case HomeRingKind.sleep:
       final v = d.sleepMin.value;
       final need = d.sleepNeedMin.value;
       return v == null
-          ? _gap(k, l?.homeRingSleep ?? 'Sleep', LucideIcons.moon, C.blue,
+          ? _gap(k, l?.homeRingSleep ?? 'Sleep', LucideIcons.moon, C.sleep,
               d.sleepMin, l?.homeRingNoSleep ?? 'No sleep', l,
               fallbackWhy: l?.homeSleepGapFallback ??
                   'No night long enough to score was recorded.')
-          : _RingState(k, l?.homeRingSleep ?? 'Sleep', LucideIcons.moon, C.blue,
-              value: hm(v),
+          : _RingState(k, l?.homeRingSleep ?? 'Sleep', LucideIcons.moon, C.sleep,
+              value: need == null || need <= 0
+                  ? hm(v)
+                  : '${(v / need * 100).round()}%',
               // No computed need means no denominator. The hardcoded 480 in
               // the sleep bundle is not this user's need and must never be
               // shown as one, so the ring stays open and says so.
               sub: need == null
                   ? (l?.homeSleepNoTarget ?? 'No target yet')
+                  : hm(v),
+              spokenDetail: need == null || need <= 0 ? ''
                   : (l?.homeOfSpan(hm(need)) ?? 'of ${hm(need)}'),
               frac: need == null || need <= 0 ? null : v / need);
   }
@@ -1118,14 +1130,42 @@ class _Dial extends StatelessWidget {
             : Ring(r.frac ?? 0, r.arc(p), p.track,
                 stroke: stroke, t: animate(c, 1), solid: r.measured),
       ),
-      Icon(r.icon, size: icon, color: r.ink(p)),
+        if (r.measured)
+          Padding(
+            padding: const EdgeInsets.all(S.x3),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    r.value,
+                    style: F.n34.copyWith(
+                      color: r.provisional ? p.ink3 : p.ink,
+                    ),
+                  ),
+                  if (r.kind == HomeRingKind.recovery)
+                    Text(
+                      '%',
+                      style: F.n17.copyWith(
+                        color: r.provisional ? p.ink3 : p.ink,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          )
+        else
+          Icon(r.icon, size: icon, color: r.ink(p)),
     ]);
   }
 }
 
-/// The default: three across, the number under the ring rather than inside it.
-/// Inside is where a duration overflows its own circle at the first
-/// accessibility step, and nothing about "7h 45m" gets shorter.
+/// Three across at ordinary text sizes, with the headline inside each ring.
+/// The duration is retained under a scaled sleep percentage; without a real
+/// computed sleep need the ring shows the duration and has no invented sweep.
 class _RingColumn extends StatelessWidget {
   final _RingState r;
   final VoidCallback? onTap;
@@ -1138,10 +1178,10 @@ class _RingColumn extends StatelessWidget {
         semanticLabel: r.spoken,
         child: Column(children: [
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 96),
+            constraints: const BoxConstraints(maxWidth: 104),
             child: AspectRatio(
               aspectRatio: 1,
-              child: _Dial(r, stroke: 7, icon: 20),
+              child: _Dial(r, stroke: 5, icon: 20),
             ),
           ),
           const SizedBox(height: S.x3),
@@ -1189,18 +1229,27 @@ class _RingText extends StatelessWidget {
         ? CrossAxisAlignment.center
         : CrossAxisAlignment.start;
     return Column(crossAxisAlignment: cross, children: [
-      Text(r.label.toUpperCase(),
-          style: F.over.copyWith(color: p.ink3), textAlign: align),
-        const SizedBox(height: S.x1),
-        // Absent reads as words, never as a dash and never as a zero — so it
-        // takes the sentence weight rather than the numeral one.
-        Text(
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: align == TextAlign.center
+              ? MainAxisAlignment.center
+              : MainAxisAlignment.start,
+          children: [
+            Flexible(
+              child: Text(r.label.toUpperCase(),
+          style: F.over.copyWith(color: p.ink, letterSpacing: 1.1), textAlign: align),
+            ),
+            Icon(LucideIcons.chevronRight, size: 12, color: p.ink3),
+          ],
+        ),
+        if (!r.measured) ...[
+          const SizedBox(height: S.x1),
+          Text(
           presentationText(AppLocalizations.of(c), r.value),
-          style: r.measured
-              ? F.n24.copyWith(color: r.provisional ? p.ink3 : p.ink)
-              : F.body.copyWith(color: p.ink2),
+          style: F.cap.copyWith(color: p.ink2),
           textAlign: align,
         ),
+        ],
         if (r.sub.isNotEmpty) ...[
           const SizedBox(height: 2),
           Text(
@@ -1271,7 +1320,7 @@ class HomeData {
   final String? dayId;
   final Metric readiness;
   final List<Map<String, dynamic>> drivers;
-  final Metric sleepMin, rhr, steps, calories, caloriesTotal;
+  final Metric sleepMin, rhr, steps, calories, caloriesTotal, stress;
 
   /// The day's 0–21 strain, read from the same `getToday` bundle the Workout
   /// tab reads. Nothing on this screen computes it.
@@ -1333,6 +1382,7 @@ class HomeData {
     this.steps = Metric.empty,
     this.calories = Metric.empty,
     this.caloriesTotal = Metric.empty,
+    this.stress = Metric.empty,
     this.strain = Metric.empty,
     this.stepGoal = kDefaultStepGoal,
     this.sleepNeedMin = Metric.empty,
@@ -1361,7 +1411,8 @@ class HomeData {
         steps: steps,
         calories: calories,
         caloriesTotal: caloriesTotal,
-        strain: strain,
+    stress: stress,
+    strain: strain,
         stepGoal: stepGoal,
         sleepNeedMin: sleepNeedMin,
         bedtime: bedtime,
@@ -1478,6 +1529,13 @@ class HomeData {
       steps: metricOf(d('steps')),
       calories: metricOf(d('calories')),
       caloriesTotal: metricOf(d('calories_total')),
+      stress: heldOver == null
+          ? envMetric(
+              today['stress'],
+              (today['stress'] as Map?)?['score'] as num?,
+              unit: '/100',
+            )
+          : Metric(note: staleOvernightNote(today, l)),
       stepGoal: (today['step_goal'] as num?)?.toInt() ?? kDefaultStepGoal,
       // sleep_coach.need is the COMPUTED need. `sleep.need_min` is a hardcoded
       // 480 and must never be shown as "your sleep need".
@@ -1732,7 +1790,6 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
     final p = P.of(c);
     final l = AppLocalizations.of(c);
     final d = _d;
-    final g = _greeting(widget.hour ?? DateTime.now().hour, l);
 
     if (d == null) {
       return _refreshable(ListView(padding: pad, children: [
@@ -1841,52 +1898,9 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
       // state on a morning whose own bundle has not derived yet, which is
       // exactly the morning you would most want to be told.
       ...?_bodyWatch(c, d, todayLabel(widget.now)),
-      // ── greeting ──
-      Padding(
-        padding: const EdgeInsets.only(top: S.x3, bottom: S.x5),
-        child: Row(children: [
-          Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Flexible(
-                  child: Text(
-                    d.name == null || d.name!.isEmpty
-                        ? g.word
-                        : '${g.word}, ${d.name}',
-                    style: F.t2.copyWith(color: p.ink),
-                  ),
-                ),
-                const SizedBox(width: S.x2),
-                Icon(g.icon, size: 17, color: p.on(g.color)),
-              ]),
-              const SizedBox(height: 2),
-              Text(prettyDay(d.dayId, l), style: F.cap.copyWith(color: p.ink3)),
-              // How far the band's data reaches, always — the question "am I
-              // looking at today, or at last night?" used to be answerable
-              // only by opening Profile > Devices.
-              syncedThroughLine(c, d.dayId, l),
-              // Its own line, not squeezed into the sync line's row: at
-              // accessibility text sizes that row has no slack left, and
-              // `Expanded` would only shrink the sync text into extra wrapped
-              // lines to make room rather than ever actually overflow.
-              if (batteryLine(c) case final battery?) ...[
-                const SizedBox(height: 2),
-                battery,
-              ],
-            ]),
-          ),
-          const SizedBox(width: S.x3),
-          // The coach moved to its own chip under the plan, and Profile is the
-          // same avatar every tab carries.
-          const ProfileAvatar(accent: C.domHome),
-        ]),
-      ),
+          _homeHeader(c, d, p, l),
 
-      if (bare) ...[
-        const DetectedActivitiesCard(),
-      ],
-      ...dayNavRow(_day ?? d.dayId, _days, _goDay),
+      if (bare) const DetectedActivitiesCard(),
       // Stepped back through the record: one tap home.
       if (!isToday)
         Align(
@@ -1985,8 +1999,15 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
             );
           }),
 
-        const SizedBox(height: S.x3),
-        const DetectedActivitiesCard(),
+        if (isToday) ...[
+          const SizedBox(height: S.x5),
+            _monitors(c, d),
+            const SizedBox(height: S.x6),
+        ],
+            syncedThroughLine(c, d.dayId, l),
+            const SizedBox(height: S.x4),
+            _myDay(c, d, isToday: isToday),
+            const DetectedActivitiesCard(),
         const CommunityNudge(),
 
         // ── the rollup was withheld, not absent ──
@@ -2039,7 +2060,236 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         const SizedBox(height: S.x4),
         coachChip(c),
       ],
-    ]));
+        ],
+      ),
+    );
+  }
+
+  Widget _homeHeader(BuildContext c, HomeData d, P p, AppLocalizations? l) {
+    final greeting = _greeting(widget.hour ?? DateTime.now().hour, l);
+    return Padding(
+      padding: const EdgeInsets.only(top: S.x2, bottom: S.x6),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const ProfileAvatar(accent: C.domHome),
+              const SizedBox(width: S.x2),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.center,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: _days.length >= 2 ? 200 : 140),
+                    child: _days.length >= 2
+                    ? DayNav(day: _day ?? d.dayId, days: _days, onDay: _goDay)
+                    : Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: S.x3,
+                          vertical: S.x2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: p.card2,
+                          borderRadius: R.rPill,
+                        ),
+                        child: Text(
+                          dayNavLabel(d.dayId, l).toUpperCase(),
+                          textAlign: TextAlign.center,
+                          style: F.over.copyWith(color: p.ink),
+                        ),
+                      ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: S.x3),
+              if (batteryLine(c) case final battery?)
+                battery
+              else
+                Icon(LucideIcons.watch, size: 22, color: p.ink3),
+            ],
+          ),
+          const SizedBox(height: S.x3),
+          Semantics(
+            label: d.name == null || d.name!.isEmpty
+                ? greeting.word : '${greeting.word}, ${d.name}',
+            child: Text('WHOOP', style: F.head.copyWith(
+                color: p.ink, fontWeight: FontWeight.w500, letterSpacing: 2)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _myDay(BuildContext c, HomeData d, {required bool isToday}) {
+    final p = P.of(c);
+    final l = AppLocalizations.of(c);
+    AppState? app;
+    try { app = c.read<AppState>(); } catch (_) { /* Gallery snapshot. */ }
+    final host = app;
+    final start = host == null ? null : () => go(c,
+        ActivityPicker(host: activityHost(host),
+            weightKg: (host.user?['weight_kg'] as num?)?.toDouble()));
+
+    Widget action(IconData icon, String label, VoidCallback? onTap) => Pressable(
+      onTap: onTap,
+      semanticLabel: label,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: S.x3, vertical: S.x3),
+        decoration: BoxDecoration(color: p.card2, borderRadius: R.rSm),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 16, color: p.ink),
+          const SizedBox(width: S.x2),
+          Flexible(child: Text(label.toUpperCase(), textAlign: TextAlign.center,
+              style: F.over.copyWith(color: p.ink, letterSpacing: .8))),
+        ]),
+      ),
+    );
+
+    final log = action(LucideIcons.plus,
+        l?.workoutLogPastFix ?? 'Log a past workout',
+        () => go(c, const LogWorkout()));
+    final begin = action(LucideIcons.timer,
+        l?.workoutStartSessionLabel ?? 'Start a session', start);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        Expanded(child: Text(l?.homeMyDay ?? 'My Day',
+            style: F.t2.copyWith(color: p.ink))),
+        if (isToday) Pressable(
+          semanticLabel: l?.workoutLogPastFix ?? 'Log a past workout',
+          onTap: () => go(c, const LogWorkout()),
+          child: Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(color: p.ink, borderRadius: R.rMd),
+            child: Icon(LucideIcons.plus, size: 23, color: p.bg),
+          ),
+        ),
+      ]),
+      const SizedBox(height: S.x3),
+      Surface(
+        color: p.wash(C.sleep),
+        pad: const EdgeInsets.symmetric(horizontal: S.x4, vertical: S.x3),
+        onTap: () => go(c, DayTimelineScreen(day: _day)),
+        child: Row(children: [
+          Icon(LucideIcons.moon, size: 18, color: p.on(C.sleep)),
+          const SizedBox(width: S.x3),
+          Expanded(child: Text(l?.homeDayReview ?? 'Your Day In Review',
+              style: F.body.copyWith(color: p.ink))),
+          Icon(LucideIcons.chevronRight, size: 17, color: p.on(C.sleep)),
+        ]),
+      ),
+      if (isToday) ...[
+        const SizedBox(height: S.x3),
+        Surface(
+          child: bigText(c)
+              ? Column(children: [log, const SizedBox(height: S.x2), begin])
+              : Row(children: [Expanded(child: log),
+                  const SizedBox(width: S.x2), Expanded(child: begin)]),
+        ),
+      ],
+    ]);
+  }
+
+  Widget _monitors(BuildContext c, HomeData d) {
+    final p = P.of(c);
+    final l = AppLocalizations.of(c);
+    Widget monitor(
+      String title,
+      IconData icon,
+      Color accent,
+      String value,
+      String subtitle,
+      VoidCallback onTap,
+    ) {
+      return Surface(
+        pad: const EdgeInsets.all(S.x3),
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title.toUpperCase(),
+                    style: F.over.copyWith(color: p.ink, letterSpacing: 1),
+                  ),
+                ),
+                Icon(LucideIcons.chevronRight, size: 15, color: p.ink3),
+              ],
+            ),
+            const SizedBox(height: S.x3),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(S.x1),
+                  decoration: BoxDecoration(
+                    color: p.wash(accent),
+                    borderRadius: R.rSm,
+                  ),
+                  child: Icon(icon, size: 15, color: p.on(accent)),
+                ),
+                const SizedBox(width: S.x2),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        value,
+                        style: F.cap.copyWith(
+                          color: p.on(accent),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(subtitle, style: F.cap.copyWith(
+                          color: p.ink3, letterSpacing: 0, height: 1.35)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    final health = monitor(
+      l?.homeHealthMonitor ?? 'Health monitor',
+      LucideIcons.heartPulse,
+      C.recovery,
+      l?.healthTabVitals ?? 'Vitals',
+      l?.homeRestingSub ?? 'Resting',
+      () => go(c, const HealthScreen()),
+    );
+    final stress = monitor(
+      l?.homeStressMonitor ?? 'Stress monitor',
+      LucideIcons.activity,
+      C.strain,
+      d.stress.isEmpty
+          ? (l?.homeStepsNotRecorded ?? 'NOT RECORDED')
+          : '${d.stress.value!.round()}/100',
+      d.stress.isEmpty
+          ? (whyFromNote(d.stress.note) ??
+              l?.metricDetailNoValueYet ?? 'Today has not produced a value yet.')
+          : dayNavLabel(d.dayId, l),
+      () => go(c, const MetricDetail('stress')),
+    );
+    return bigText(c)
+        ? Column(
+            children: [
+              health,
+              const SizedBox(height: S.x3),
+              stress,
+            ],
+          )
+        : IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: health),
+                const SizedBox(width: S.x3),
+                Expanded(child: stress),
+              ]));
   }
 
   /// The illness watch, on Home, at amber as well as red.

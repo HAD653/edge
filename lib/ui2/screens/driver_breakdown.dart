@@ -329,9 +329,12 @@ class _DriverBreakdownState extends State<DriverBreakdown> {
       if (rows.isNotEmpty) rows.add(Divider(color: p.line, height: 1));
       rows.add(Padding(
         padding: const EdgeInsets.only(top: S.x3, bottom: S.x1),
-        child: Text(title, style: F.cap.copyWith(color: p.ink3)),
+        child: Text(title.toUpperCase(),
+            style: F.section.copyWith(color: p.ink3)),
       ));
-      for (final f in items) {
+      for (var i = 0; i < items.length; i++) {
+        final f = items[i];
+        if (i > 0) rows.add(Divider(color: p.line, height: 1));
         rows.add(_DriverTile(
           f,
           open: _open == f.key,
@@ -388,11 +391,17 @@ class _DriverTile extends StatelessWidget {
     final why = f.used ? null : whyFromNote(f.note);
 
     final head = Padding(
-      padding: const EdgeInsets.symmetric(vertical: S.x3),
+      padding: const EdgeInsets.symmetric(vertical: S.x4),
       child: Row(children: [
+        if (!bigText(c)) ...[
+          Icon(f.spec.icon, size: S.x5, color: p.ink3),
+          const SizedBox(width: S.x3),
+        ],
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(f.label, style: F.body.copyWith(color: p.ink)),
+            Text(f.label.toUpperCase(),
+                style: F.section.copyWith(color: p.ink)),
+            const SizedBox(height: S.x1),
             if (value != null)
               Text(value, style: F.cap.copyWith(color: p.ink2, height: 1.4)),
             if (quals.isNotEmpty)
@@ -408,7 +417,7 @@ class _DriverTile extends StatelessWidget {
           Text(
             '${contribution >= 0 ? '+' : '−'}'
             '${contribution.abs().toStringAsFixed(1)}',
-            style: F.n17
+            style: F.n24
                 .copyWith(color: p.on(contribution >= 0 ? C.green : C.orange)),
           ),
         ],
@@ -466,7 +475,7 @@ Widget _chart(BuildContext c, P p, DriverFacts f) {
   return ChartFrame(
     title: f.label,
     unit: f.spec.unit,
-    height: 110,
+    height: 148,
     yAxis: axis,
     xLabels: win.length < 2
         ? const []

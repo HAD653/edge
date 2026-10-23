@@ -25,6 +25,7 @@ import '../../import/lab_csv_import.dart';
 import '../../l10n/app_localizations.dart';
 import '../../state/app_state.dart';
 import '../ui2.dart';
+import '../demo/demo_screen.dart';
 
 /// What an import actually achieved, including what it could NOT use.
 class ImportOutcome {
@@ -304,6 +305,9 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
         outcome: _outcome,
         onNew: () => context.read<AppState>().chooseNewUser(),
         onImport: _import,
+        onDemo: () => Navigator.of(context).push<void>(
+          MaterialPageRoute(builder: (_) => const DemoScreen()),
+        ),
       );
 }
 
@@ -383,7 +387,7 @@ Future<ImportOutcome> runImport(
   }
 
   if (decrypted.isNotEmpty) sources.add('Encrypted backup');
-  if (plain.any(_isDbBackup)) sources.add('OpenStrap backup');
+  if (plain.any(_isDbBackup)) sources.add('WHOOP backup');
   try {
     for (final p in db) {
       days += await app.importEdgeBackup(p);
@@ -561,11 +565,13 @@ class WelcomeView extends StatelessWidget {
   final ImportOutcome? outcome;
   final VoidCallback onNew;
   final VoidCallback onImport;
+  final VoidCallback? onDemo;
 
   const WelcomeView({
     super.key,
     required this.onNew,
     required this.onImport,
+    this.onDemo,
     this.busy = false,
     this.outcome,
   });
@@ -622,9 +628,23 @@ class WelcomeView extends StatelessWidget {
               // the same rolling baselines. What IS true is the half that
               // protects data: no import overwrites a day this band measured.
               l?.welcomeImportFooterNote ??
-                  'A sensor export, an OpenStrap backup or a vendor CSV. Imported days count toward your usual range, and never overwrite a day the band measured.',
+                  'A sensor export, a WHOOP backup or a vendor CSV. Imported days count toward your usual range, and never overwrite a day the band measured.',
               style: F.cap.copyWith(color: p.ink3),
             ),
+            if (onDemo != null) ...[
+              const SizedBox(height: S.x6),
+              BigButton(l?.demoExplore ?? 'Explore demo',
+                  icon: LucideIcons.play,
+                  color: C.blue,
+                  soft: true,
+                  onTap: busy ? null : onDemo),
+              const SizedBox(height: S.x2),
+              Text(
+                l?.demoDescription ??
+                    'Explore with fictional data. No band or account needed. Nothing is saved.',
+                style: F.cap.copyWith(color: p.ink3),
+              ),
+            ],
             if (busy) ...[
               const SizedBox(height: S.x6),
               Center(child: CircularProgressIndicator(color: p.on(C.blue))),

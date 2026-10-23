@@ -256,7 +256,7 @@ struct OpenStrapWidgetEntryView: View {
       case .accessoryInline:
         Text(entry.snap.recovery.measured
              ? "Recovery \(entry.snap.recovery.value)"
-             : "OpenStrap · \(entry.snap.recovery.value.lowercased())")
+             : "WHOOP · \(entry.snap.recovery.value.lowercased())")
       default: SmallView(snap: entry.snap)
       }
     }
@@ -270,7 +270,7 @@ struct OpenStrapWidget: Widget {
     StaticConfiguration(kind: kind, provider: Provider()) { entry in
       OpenStrapWidgetEntryView(entry: entry)
     }
-    .configurationDisplayName("OpenStrap")
+    .configurationDisplayName("Edge")
     .description("Recovery, strain and sleep at a glance.")
     .supportedFamilies([.systemSmall, .systemMedium,
                         .accessoryCircular, .accessoryRectangular, .accessoryInline])

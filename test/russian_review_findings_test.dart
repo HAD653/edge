@@ -503,6 +503,13 @@ void main() {
                   ? ru.metricDetailRankFromBand(axisDay(ts), 12, band)
                   : ru.metricDetailRankFrom(axisDay(ts), 12));
         expect(expected, contains('выше, чем в 12% ваших дней'));
+        // The normal-range section follows the taller trend chart. Preserve
+        // the exact dated sentence while reaching it as a user would.
+        await t.scrollUntilVisible(
+          find.text(expected),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
         expect(find.text(expected), findsOneWidget);
         expect(t.takeException(), isNull);
       });
@@ -592,46 +599,57 @@ void main() {
   testWidgets(
     'readiness breakdown localizes input labels without changing keys',
     (t) async {
-      final rows = [
-        for (final key in ['hrv', 'rhr', 'resp', 'temp'])
-          <String, dynamic>{
-            'label': key,
-            'weight': 0.25,
-            'used': true,
-            'past_mdc': true,
-            'weighted_contribution': 15,
-          },
-      ];
-      final before = jsonEncode(rows);
-      await t.pumpWidget(
-        page(
-          ReadinessDetail(
-            data: ReadinessData(
-              readiness: const Metric(value: 60),
-              breakdown: rows,
-              inputsUsed: 4,
+      final handle = t.ensureSemantics();
+      try {
+        final rows = [
+          for (final key in ['hrv', 'rhr', 'resp', 'temp'])
+            <String, dynamic>{
+              'label': key,
+              'weight': 0.25,
+              'used': true,
+              'past_mdc': true,
+              'weighted_contribution': 15,
+            },
+        ];
+        final before = jsonEncode(rows);
+        await t.pumpWidget(
+          page(
+            ReadinessDetail(
+              data: ReadinessData(
+                readiness: const Metric(value: 60),
+                breakdown: rows,
+                inputsUsed: 4,
+              ),
             ),
           ),
-        ),
-      );
-      await t.pumpAndSettle();
-      for (final name in [
-        ru.readinessDetailAskHrv,
-        ru.readinessDetailAskRhr,
-        ru.readinessDetailAskResp,
-        ru.readinessDetailAskTemp,
-      ]) {
-        expect(find.text(name), findsWidgets);
+        );
+        await t.pumpAndSettle();
+        for (final (label, question) in [
+          (ru.homeDriverHrv, ru.readinessDetailAskHrv),
+          (ru.homeDriverRhr, ru.readinessDetailAskRhr),
+          (ru.homeDriverResp, ru.readinessDetailAskResp),
+          (ru.homeDriverTemp, ru.readinessDetailAskTemp),
+        ]) {
+          final visibleLabel = find.text(label.toUpperCase());
+          expect(visibleLabel, findsWidgets);
+          await t.ensureVisible(visibleLabel.first);
+          await t.pumpAndSettle();
+          expect(find.bySemanticsLabel(RegExp(RegExp.escape(question))),
+              findsWidgets);
+        }
+        // Compact visible labels retain the full localized question in semantics;
+        // an input outside its range still answers in the same honest terms.
+        expect(
+          find.textContaining(
+            '${ru.readinessDetailOutsideRange} · ${ru.readinessDetailLiftingScore}',
+          ),
+          findsNWidgets(4),
+        );
+        expect(jsonEncode(rows), before);
+        expect(t.takeException(), isNull);
+      } finally {
+        handle.dispose();
       }
-      // Every row is a question, so an input outside its range still answers.
-      expect(
-        find.textContaining(
-          '${ru.readinessDetailOutsideRange} · ${ru.readinessDetailLiftingScore}',
-        ),
-        findsNWidgets(4),
-      );
-      expect(jsonEncode(rows), before);
-      expect(t.takeException(), isNull);
     },
   );
 }

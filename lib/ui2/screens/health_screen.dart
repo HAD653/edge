@@ -138,7 +138,12 @@ class HealthData {
     return metricOf(b is Map ? b['duration_min'] : null);
   }
 
-  Metric get stress => metricOf(today['stress']);
+  Metric get stress {
+    final raw = today['stress'];
+    return raw is Map
+        ? envMetric(raw, raw['score'] as num?, unit: '/100')
+        : Metric.empty;
+  }
   Metric get resp => metricOf(today['resp']);
 
   static Future<HealthData> load(LocalRepository repo) async {
@@ -697,11 +702,25 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
         if (s != null) gaps.add(s);
         return;
       }
-      rows.add(MetricRow(icon, col, name, value,
-          sub: sub,
+      final band = usualRangeFor(
+        metricKey,
+        valuesOf(d.points(metricKey)),
+        d.baselines,
+      );
+      rows.add(
+        _HealthVitalTile(
+          icon: icon,
+          color: col,
+          title: name,
+          value: value,
           unit: unit,
-          series: series,
-          rising: rising,
+          subtitle: sub,
+          verdict: band == null || m.value == null
+              ? null
+              : usualWord(l, band.side(m.value!.toDouble())),
+          inRange: band == null || m.value == null
+              ? null
+              : band.side(m.value!.toDouble()) == Side.inside,
           onTap: () => go(c, MetricDetail(metricKey))));
     }
 
@@ -882,16 +901,26 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
             style: F.cap.copyWith(color: p.ink3)),
         const SizedBox(height: S.x2),
       ],
-      if (rows.isNotEmpty)
-        Surface(
-          pad: const EdgeInsets.symmetric(horizontal: S.x4),
-          child: Column(children: [
-            for (var i = 0; i < rows.length; i++) ...[
-              if (i > 0) Divider(color: p.line, height: 1),
-              rows[i],
-            ],
-          ]),
-        ),
+      if (widget.data == null && repoOf(c) != null) ...[
+        const LiveHrCard(),
+        const SizedBox(height: S.x4),
+      ],
+      for (var i = 0; i < rows.length; i += bigText(c) ? 1 : 2) ...[
+        if (i > 0) const SizedBox(height: S.x3),
+        if (bigText(c) || i + 1 >= rows.length)
+          rows[i]
+        else
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: rows[i]),
+                const SizedBox(width: S.x3),
+                Expanded(child: rows[i + 1]),
+              ],
+            ),
+          ),
+      ],
       for (final g in gaps) ...[const SizedBox(height: S.x3), g],
       // The active wearable's heart rows, each with its class, source line
       // and reason. Nothing on a WHOOP-only install, nor when handed data.
@@ -1408,7 +1437,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
               // derive happen for a night that has already been scored.
               '${none.map((r) => uiText(c, specOf(r.key).title)).join(' · ')}. '
                 '${l?.healthNoDayProduced ?? 'No day on this device has '
-                    'produced one yet.'}',
+                      'produced one yet.'}',
               icon: LucideIcons.chartLine,
             ),
           ],
@@ -1831,5 +1860,92 @@ bool _cycleTrackingOn(BuildContext c) {
     return c.select<AppState, bool>((a) => a.cycleTrackingEnabled);
   } on ProviderNotFoundException {
     return false;
+  }
+}
+
+class _HealthVitalTile extends StatelessWidget {
+  const _HealthVitalTile({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.value,
+    required this.unit,
+    required this.subtitle,
+    required this.onTap,
+    this.verdict,
+    this.inRange,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title, value, unit, subtitle;
+  final String? verdict;
+  final bool? inRange;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext c) {
+    final p = P.of(c);
+    final accent = inRange == true ? C.recovery : color;
+    return Surface(
+      color: p.card2,
+      pad: const EdgeInsets.all(S.x3),
+      onTap: onTap,
+      semanticLabel: '$title: $value $unit. $subtitle',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(icon, size: 15, color: p.ink3),
+              ),
+              const SizedBox(width: S.x2),
+              Expanded(
+                child: Text(
+                  title.toUpperCase(),
+                  style: F.over.copyWith(color: p.ink2, letterSpacing: 1),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: S.x4),
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.end,
+            spacing: S.x1,
+            children: [
+              Text(value, style: F.n34.copyWith(color: p.ink)),
+              if (unit.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: S.x1),
+                  child: Text(unit, style: F.cap.copyWith(color: p.ink2)),
+                ),
+            ],
+          ),
+          const SizedBox(height: S.x3),
+          if (verdict != null)
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: S.x1,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: p.wash(accent),
+                borderRadius: R.rSm,
+              ),
+              child: Text(
+                verdict!,
+                style: F.over.copyWith(color: p.on(accent)),
+              ),
+            ),
+          if (subtitle.isNotEmpty) ...[
+            const SizedBox(height: S.x1),
+            Text(subtitle, style: F.over.copyWith(color: p.ink3)),
+          ],
+        ],
+      ),
+    );
   }
 }

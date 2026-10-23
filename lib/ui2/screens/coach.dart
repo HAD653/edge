@@ -506,7 +506,7 @@ class _CoachScreenState extends State<CoachScreen> {
           StatusCard(
             l?.coachNotSetUpTitle ?? 'The coach is not set up',
             l?.coachNotSetUpBody ??
-                'Pick a model on your own computer, or any OpenAI-compatible provider with your own key. Nothing goes through OpenStrap either way.',
+                'Pick a model on your own computer, or any OpenAI-compatible provider with your own key. Nothing goes through WHOOP either way.',
             fix: l?.coachChooseModelFix ?? 'Choose a model',
             icon: LucideIcons.sparkles,
             onFix: () => go(c, const CoachSetup()),
@@ -534,7 +534,7 @@ class _CoachScreenState extends State<CoachScreen> {
         children: [
           const SizedBox(height: S.x2),
           Surface(
-            color: p.wash(kCoachAccent),
+            color: p.card,
             elevation: 0,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -549,7 +549,7 @@ class _CoachScreenState extends State<CoachScreen> {
                     const SizedBox(width: S.x2),
                     Text(
                       l?.coachYourDataYourModel ?? 'YOUR DATA, YOUR MODEL',
-                      style: F.over.copyWith(color: p.on(kCoachAccent)),
+                      style: F.section.copyWith(color: p.ink),
                     ),
                   ],
                 ),
@@ -629,8 +629,8 @@ class _CoachScreenState extends State<CoachScreen> {
               vertical: S.x2,
             ),
             decoration: BoxDecoration(
-              color: p.card,
-              borderRadius: R.rXl,
+              color: p.card2,
+              borderRadius: R.rSm,
               border: Border.all(color: p.line),
             ),
             child: Semantics(

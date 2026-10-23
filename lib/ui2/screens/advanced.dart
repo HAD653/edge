@@ -24,10 +24,20 @@ class AdvancedScreen extends StatelessWidget {
     final p = P.of(c);
     final l = AppLocalizations.of(c);
     return detailScaffold(c, l?.advancedTitle ?? 'Advanced charts', [
-      Text(
-        l?.advancedIntro ??
-            'Research views of the same data. Nothing here changes your scores.',
-        style: F.cap.copyWith(color: p.ink2, height: 1.5),
+      Surface(
+        pad: const EdgeInsets.all(S.x5),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(LucideIcons.chartNoAxesCombined, size: 24, color: p.on(C.strain)),
+          const SizedBox(height: S.x4),
+          Text((l?.advancedTitle ?? 'Advanced charts').toUpperCase(),
+              style: F.over.copyWith(color: p.ink, letterSpacing: 1.2)),
+          const SizedBox(height: S.x2),
+          Text(
+            l?.advancedIntro ??
+                'Research views of the same data. Nothing here changes your scores.',
+            style: F.cap.copyWith(color: p.ink2, height: 1.5),
+          ),
+        ]),
       ),
       const SizedBox(height: S.x4),
       detailLinkRow(

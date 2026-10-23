@@ -170,16 +170,22 @@ class ProfileAvatar extends StatelessWidget {
           AppLocalizations.of(c)?.homeProfileSettings ?? 'Profile and settings',
       onTap: () => openProfile(c),
       child: Container(
-        width: 40,
-        height: 40,
+        width: p.dark ? 28 : 40,
+        height: p.dark ? 28 : 40,
         alignment: Alignment.center,
-        decoration: BoxDecoration(shape: BoxShape.circle, color: p.fill(accent)),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: p.dark ? const Color(0x00000000) : p.fill(accent),
+          border: p.dark ? Border.all(color: p.ink, width: 1.2) : null,
+        ),
         child: initial.isEmpty
-            ? Icon(LucideIcons.user, size: 18, color: p.inkOnFill)
+            ? Icon(LucideIcons.user, size: p.dark ? 17 : 18,
+                color: p.dark ? p.ink : p.inkOnFill)
             : ExcludeSemantics(
                 child: Text(initial.characters.first.toUpperCase(),
                     style: F.body.copyWith(
-                        color: p.inkOnFill, fontWeight: FontWeight.w600)),
+                        color: p.dark ? p.ink : p.inkOnFill,
+                        fontWeight: FontWeight.w600)),
               ),
       ),
     );
@@ -426,7 +432,7 @@ class ProfileHomeView extends StatelessWidget {
                   SetRow.brand(brandGlyph('assets/icons/reddit.svg'), C.orange,
                       l?.profileRedditTitle ?? 'Reddit',
                       sub: l?.profileRedditSub ??
-                          'Join r/OpenStrap — post your achievements, '
+                          'Join the project community on r/OpenStrap — post your achievements, '
                               'questions, anything',
                       onTap: () => open3rdPartyLink(kRedditUrl)),
                   SetRow.brand(brandGlyph('assets/icons/discord.svg'),

@@ -120,7 +120,10 @@ class ReadinessData {
 
 class ReadinessDetail extends StatefulWidget {
   final ReadinessData? data;
-  const ReadinessDetail({super.key, this.data});
+  /// A supplied snapshot without navigation into the live database.
+  final bool readOnly;
+  const ReadinessDetail({super.key, this.data, this.readOnly = false})
+      : assert(!readOnly || data != null);
 
   @override
   State<ReadinessDetail> createState() => _ReadinessDetailState();
@@ -164,7 +167,6 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
     final l = AppLocalizations.of(c);
     final d = _d ?? const ReadinessData();
     final v = d.readiness.value;
-    final band = readinessBand(v, l);
 
     // No date in the nav bar. It named the held-over night, and the headline
     // can no longer BE that night — a date up here now would be labelling
@@ -234,33 +236,7 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
             ]);
           }),
         ] else
-          Surface(
-            child: Column(children: [
-              SizedBox(
-                width: 150,
-                height: 150,
-                child: Stack(alignment: Alignment.center, children: [
-                  CustomPaint(
-                    size: const Size(150, 150),
-                    painter: Ring(d.readiness.normalized(100),
-                        d.provisional ? p.ink3 : p.on(band.color),
-                        p.track,
-                        stroke: 14, t: animate(c, 1)),
-                  ),
-                  Column(mainAxisSize: MainAxisSize.min, children: [
-                    Text('${v.round()}',
-                        style: F.n48.copyWith(
-                            color: d.provisional ? p.ink3 : p.ink)),
-                    Text(band.label, style: F.cap.copyWith(color: p.ink3)),
-                  ]),
-                ]),
-              ),
-              if (recoveryStateLine(d.head, l) case final note?) ...[
-                const SizedBox(height: S.x2),
-                Text(note, style: F.cap.copyWith(color: p.ink3)),
-              ],
-            ]),
-          ),
+          _hero(c, p, d),
 
         if (d.breakdown.isNotEmpty) ...[
           Section(l?.readinessDetailWhatWentIntoIt ?? 'What went into it',
@@ -323,9 +299,86 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
               : Surface(child: _history(c, d)),
         ),
         const SizedBox(height: S.x5),
-        investigateRow(c, () => go(c, const Investigate('readiness'))),
+        if (!widget.readOnly)
+          investigateRow(c, () => go(c, const Investigate('readiness'))),
       ],
     ]);
+  }
+
+  Widget _hero(BuildContext c, P p, ReadinessData d) {
+    final l = AppLocalizations.of(c);
+    final value = d.readiness.value!;
+    final band = readinessBand(value, l);
+    final ink = d.provisional ? p.ink3 : p.ink;
+    final accent = d.provisional ? p.ink3 : p.on(band.color);
+    final reading = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(LucideIcons.heartPulse, size: S.x6, color: p.ink3),
+        const SizedBox(height: S.x3),
+        Text('${value.round()}', style: F.hero.copyWith(color: ink)),
+        const SizedBox(height: S.x2),
+        Text(
+          (l?.readinessDetailTitle ?? 'Recovery').toUpperCase(),
+          textAlign: TextAlign.center,
+          style: F.section.copyWith(color: p.ink2),
+        ),
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: S.x4, bottom: S.x3),
+      child: Column(
+        children: [
+          Center(
+            child: LayoutBuilder(
+              builder: (c, box) {
+                final size = box.maxWidth.clamp(0.0, S.x16 * 4);
+                if (bigText(c)) return reading;
+                return SizedBox(
+                  width: size,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: size),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Positioned.fill(
+                          child: RepaintBoundary(
+                            child: CustomPaint(
+                              painter: Ring(
+                                d.readiness.normalized(100),
+                                accent,
+                                p.track,
+                                stroke: S.x3,
+                                solid: true,
+                                t: animate(c, 1),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(S.x8),
+                          child: reading,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: S.x4),
+          Pill(band.label, d.provisional ? C.n500 : band.color),
+          if (recoveryStateLine(d.head, l) case final note?) ...[
+            const SizedBox(height: S.x2),
+            Text(
+              note,
+              textAlign: TextAlign.center,
+              style: F.cap.copyWith(color: p.ink3),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   /// The last 90 CALENDAR days, trimmed to start at the first day that
@@ -555,35 +608,61 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
             '${(share * 100).round()}% weight',
       if (!used) l?.readinessDetailNotAvailable ?? 'not available',
       if (used && contribution == null)
-        l?.readinessDetailContributionNotReported ?? 'contribution not reported',
+        l?.readinessDetailContributionNotReported ??
+            'contribution not reported',
       // The temperature input is a raw sensor deviation, not a calibrated
       // temperature. It gets said, every time.
       if (key == 'temp')
         l?.readinessDetailRelativeUncalibrated ?? 'relative, uncalibrated',
     ];
 
+    final icon = switch (key) {
+      'hrv' => LucideIcons.activity,
+      'rhr' => LucideIcons.heart,
+      'resp' => LucideIcons.wind,
+      'temp' => LucideIcons.thermometer,
+      _ => LucideIcons.chartLine,
+    };
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: S.x3),
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(_ask(key, l), style: F.body.copyWith(color: p.ink)),
-            Text(parts.join(' · '),
-                style: F.over.copyWith(color: p.ink3)),
-          ]),
+      padding: const EdgeInsets.symmetric(vertical: S.x4),
+      child: Semantics(
+        label: _ask(key, l),
+        child: Row(
+          children: [
+            if (!bigText(c)) ...[
+              Icon(icon, size: S.x5, color: p.ink3),
+              const SizedBox(width: S.x3),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    driverLabel(key, l).toUpperCase(),
+                    style: F.section.copyWith(color: p.ink2),
+                  ),
+                  const SizedBox(height: S.x1),
+                  Text(
+                    parts.join(' · '),
+                    style: F.over.copyWith(color: p.ink3),
+                  ),
+                ],
+              ),
+            ),
+            // No contribution number means no number — never a bare em-dash. The
+            // sub-line above says which case it is.
+            if (used && contribution != null) ...[
+              const SizedBox(width: S.x3),
+              Text(
+                '${contribution >= 0 ? '+' : '−'}'
+                '${contribution.abs().toStringAsFixed(1)}',
+                style: F.n24.copyWith(
+                  color: p.on(contribution >= 0 ? C.green : C.orange),
+                ),
+              ),
+            ],
+          ],
         ),
-        // No contribution number means no number — never a bare em-dash. The
-        // sub-line above says which case it is.
-        if (used && contribution != null) ...[
-          const SizedBox(width: S.x3),
-          Text(
-            '${contribution >= 0 ? '+' : '−'}'
-            '${contribution.abs().toStringAsFixed(1)}',
-            style: F.n17.copyWith(
-                color: p.on(contribution >= 0 ? C.green : C.orange)),
-          ),
-        ],
-        ],
       ),
     );
   }

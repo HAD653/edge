@@ -98,7 +98,7 @@ class _AskCard extends StatelessWidget {
           C.indigo,
           l?.nudgeDiscordTitle ?? 'Come say hi',
           l?.nudgeDiscordBody ??
-              'Other OpenStrap users hang out on Discord — bugs, ideas, and '
+              'The project community hangs out on Discord — bugs, ideas, and '
                   'people running the same band as you.',
           l?.nudgeDiscordCta ?? 'Join Discord',
           kDiscordUrl,
@@ -107,7 +107,7 @@ class _AskCard extends StatelessWidget {
           (Color tint) =>
               Icon(LucideIcons.heartHandshake, size: 16, color: tint),
           C.pink,
-          l?.nudgeDonateTitle ?? 'Enjoying OpenStrap?',
+          l?.nudgeDonateTitle ?? 'Enjoying WHOOP?',
           l?.nudgeDonateBody ??
               'It is a free, open-source project with no subscription. '
                   'Sponsoring keeps it maintained.',

@@ -1,6 +1,10 @@
 {
   "@@locale": "en",
-  "appTitle": "OpenStrap",
+  "homeMyDay": "My Day",
+  "homeHealthMonitor": "Health monitor",
+  "homeStressMonitor": "Stress monitor",
+  "homeDayReview": "Your Day In Review",
+  "appTitle": "Edge",
   "@appTitle": {
     "description": "App name shown in the OS task switcher / MaterialApp title."
   },
@@ -527,7 +531,7 @@
   "@dataImportFile": {
     "description": "Row title."
   },
-  "dataImportFileSub": "An OpenStrap backup, a journal CSV, a raw sensor export or a vendor CSV. Days the band already measured are never overwritten",
+  "dataImportFileSub": "A WHOOP backup, a journal CSV, a raw sensor export or a vendor CSV. Days the band already measured are never overwritten",
   "@dataImportFileSub": {
     "description": "Row sub."
   },
@@ -1410,7 +1414,7 @@
   "@welcomeBringMyHistoryFirst": {
     "description": "Button label: idle."
   },
-  "welcomeImportFooterNote": "A sensor export, an OpenStrap backup or a vendor CSV. Imported days count toward your usual range, and never overwrite a day the band measured.",
+  "welcomeImportFooterNote": "A sensor export, a WHOOP backup or a vendor CSV. Imported days count toward your usual range, and never overwrite a day the band measured.",
   "@welcomeImportFooterNote": {
     "description": "Footer note about imports."
   },
@@ -4457,7 +4461,7 @@
   "@coachNotSetUp": {
     "description": "Coach screen: subtitle shown wherever the coach has no model configured yet"
   },
-  "coachNotSetUpBody": "Pick a model on your own computer, or any OpenAI-compatible provider with your own key. Nothing goes through OpenStrap either way.",
+  "coachNotSetUpBody": "Pick a model on your own computer, or any OpenAI-compatible provider with your own key. Nothing goes through WHOOP either way.",
   "@coachNotSetUpBody": {
     "description": "Coach screen: body text explaining how to set up the coach and its privacy stance"
   },
@@ -9291,7 +9295,7 @@
       }
     }
   },
-  "workoutDeleteBodyOwn": "It disappears from OpenStrap. A copy in {storeName}, if there is one, stays where it is.",
+  "workoutDeleteBodyOwn": "It disappears from WHOOP. A copy in {storeName}, if there is one, stays where it is.",
   "@workoutDeleteBodyOwn": {
     "description": "Confirm-delete dialog body for a session this band recorded",
     "placeholders": {
@@ -9300,7 +9304,7 @@
       }
     }
   },
-  "workoutDeleteBodyImported": "It disappears from OpenStrap and will not be re-imported. The original in {storeName} stays.",
+  "workoutDeleteBodyImported": "It disappears from WHOOP and will not be re-imported. The original in {storeName} stays.",
   "@workoutDeleteBodyImported": {
     "description": "Confirm-delete dialog body for an imported session",
     "placeholders": {
@@ -11828,11 +11832,11 @@
   "@bandStatusBluetoothDeniedTitle": {
     "description": "BandStatus card title: app-level Bluetooth permission denied"
   },
-  "bandStatusBluetoothDeniedReason": "The phone isn’t letting OpenStrap use Bluetooth, so nothing can connect. Allow Bluetooth for OpenStrap in your phone’s settings.",
+  "bandStatusBluetoothDeniedReason": "The phone isn’t letting WHOOP use Bluetooth, so nothing can connect. Allow Bluetooth for WHOOP in your phone’s settings.",
   "@bandStatusBluetoothDeniedReason": {
     "description": "BandStatus card body: app-level Bluetooth permission denied"
   },
-  "bandStatusBluetoothDeniedFix": "Open Settings → OpenStrap and allow Bluetooth",
+  "bandStatusBluetoothDeniedFix": "Open Settings → WHOOP and allow Bluetooth",
   "@bandStatusBluetoothDeniedFix": {
     "description": "BandStatus fix action: app-level Bluetooth permission denied"
   },
@@ -12105,7 +12109,7 @@
   "@nudgeDiscordTitle": {
     "description": "Title of the Home nudge card inviting the user to join Discord."
   },
-  "nudgeDiscordBody": "Other OpenStrap users hang out on Discord — bugs, ideas, and people running the same band as you.",
+  "nudgeDiscordBody": "Connect with other users on Discord — bugs, ideas, and people running the same band as you.",
   "@nudgeDiscordBody": {
     "description": "Body of the Home nudge card inviting the user to join Discord."
   },
@@ -12113,7 +12117,7 @@
   "@nudgeDiscordCta": {
     "description": "CTA button label of the Home nudge card inviting the user to join Discord."
   },
-  "nudgeDonateTitle": "Enjoying OpenStrap?",
+  "nudgeDonateTitle": "Enjoying the app?",
   "@nudgeDonateTitle": {
     "description": "Title of the Home nudge card inviting the user to sponsor the project."
   },
@@ -13213,7 +13217,7 @@
   "@supplementALowConfidenceOverlayA9fbabe": {
     "description": "Presentation-only text for existing interface, exports or notifications."
   },
-  "supplementAMinuteOfNotesTonightac2cf6": "A minute of notes tonight teaches OpenStrap what actually moves your recovery.",
+  "supplementAMinuteOfNotesTonightac2cf6": "A minute of notes tonight teaches WHOOP what actually moves your recovery.",
   "@supplementAMinuteOfNotesTonightac2cf6": {
     "description": "Presentation-only text for existing interface, exports or notifications."
   },
@@ -14077,7 +14081,7 @@
   "@supplementG54fd17": {
     "description": "Presentation-only text for existing interface, exports or notifications."
   },
-  "supplementIOSCanOnlyShowThe2139b2": "iOS shows the pairing sheet only before the app has used Bluetooth. Close OpenStrap completely, then reopen it to see the sheet.",
+  "supplementIOSCanOnlyShowThe2139b2": "iOS shows the pairing sheet only before the app has used Bluetooth. Close WHOOP completely, then reopen it to see the sheet.",
   "@supplementIOSCanOnlyShowThe2139b2": {
     "description": "Presentation-only text for existing interface, exports or notifications."
   },
@@ -14934,9 +14938,9 @@
   "@devicePickerBlurbMiscale2": {
     "description": "Device picker blurb under this device category."
   },
-  "iosUninstallUnpairsWarning": "On iOS, deleting OpenStrap also unpairs every band and sensor paired here from the phone, so other apps, including the maker's own, lose them too.",
+  "iosUninstallUnpairsWarning": "On iOS, deleting WHOOP also unpairs every band and sensor paired here from the phone, so other apps, including the maker's own, lose them too.",
   "@iosUninstallUnpairsWarning": {
-    "description": "iOS only: AccessorySetupKit pairings are removed by iOS for all apps when OpenStrap is deleted."
+    "description": "iOS only: AccessorySetupKit pairings are removed by iOS for all apps when WHOOP is deleted."
   },
   "logFoodEditTitle": "Edit this entry",
   "@logFoodEditTitle": {
@@ -15755,5 +15759,15 @@
         "type": "String"
       }
     }
-  }
+  },
+  "demoExplore": "Explore demo",
+  "demoDescription": "Explore with fictional data. No band or account needed. Nothing is saved.",
+  "demoSampleData": "Demo · Fictional data",
+  "demoExit": "Exit demo",
+  "demoTheme": "Switch appearance",
+  "demoTodayTitle": "A day with Alex",
+  "demoHistory": "30 days of sample trends",
+  "demoRunTitle": "An example run",
+  "demoOpenActivity": "View activity",
+  "demoActivityBody": "Explore the summary, splits and heart-rate charts of a sample session."
 }

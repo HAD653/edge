@@ -156,8 +156,10 @@ List<double> maxColumns(List<double> d, int cols) {
   return [
     for (var c = 0; c < cols; c++)
       d
-          .sublist((c * n / cols).floor(),
-              ((c + 1) * n / cols).ceil().clamp((c * n / cols).floor() + 1, n))
+          .sublist(
+            (c * n / cols).floor(),
+            ((c + 1) * n / cols).ceil().clamp((c * n / cols).floor() + 1, n),
+          )
           .reduce(max),
   ];
 }
@@ -216,7 +218,10 @@ class AxisSpec {
     // so it would leave the axis looking reasonable while the sample it came
     // from punches an invisible hole in the line; an infinity used to spin the
     // step loop forever, which is a frozen UI on the main isolate.
-    final v = [for (final x in d) if (x.isFinite) x];
+    final v = [
+      for (final x in d)
+        if (x.isFinite) x,
+    ];
     if (v.isEmpty) return null;
     final n = ticks < 2 ? 2 : ticks;
     // NB: `min`/`max` are fields on this class, so dart:math's are shadowed
@@ -268,8 +273,7 @@ class AxisSpec {
     final gap = n - 1;
     if (grow < gap) grow = gap;
     grow = ((grow + gap - 1) ~/ gap) * gap;
-    return AxisSpec(
-        min: base, max: base + grow * s, ticks: n, format: format);
+    return AxisSpec(min: base, max: base + grow * s, ticks: n, format: format);
   }
 
   static bool _multiple(double a, double b) =>
@@ -279,8 +283,8 @@ class AxisSpec {
   /// finer prints a gridline the label does not name.
   static double _labelStep(String Function(double) f) =>
       f == axisInt || f == axisHm
-          ? 1
-          : (f == axisFixed || f == axisFixedOrInt ? .1 : 0);
+      ? 1
+      : (f == axisFixed || f == axisFixedOrInt ? .1 : 0);
 
   /// 1 · 2 · 2.5 · 5 · 10 × a power of ten — the steps that produce labels
   /// people read without thinking.
@@ -384,6 +388,7 @@ class LineChart extends CustomPainter {
   final List<double?> d;
   final Color color;
   final bool dots;
+  final bool smooth;
   final double t;
 
   /// A filled area reads as a quantity measured from a baseline, so it is only
@@ -407,14 +412,17 @@ class LineChart extends CustomPainter {
   /// chart is not selected and no cursor is drawn.
   final double? selectedX;
 
-  LineChart(this.d, this.color,
-      {bool fill = true,
-      this.dots = false,
-      this.t = 1,
-      this.dotInk,
-      this.axis,
-      this.selectedX})
-      : fill = fill && axis != null;
+  LineChart(
+    this.d,
+    this.color, {
+    bool fill = true,
+    this.dots = false,
+    this.smooth = true,
+    this.t = 1,
+    this.dotInk,
+    this.axis,
+    this.selectedX,
+  }) : fill = fill && axis != null;
 
   @override
   void paint(Canvas cv, Size s) {
@@ -430,10 +438,10 @@ class LineChart extends CustomPainter {
     final runs = minMaxRuns(d, s.width, y);
     var left = runs.fold<int>(0, (n, r) => n + r.length);
     left = (left * t.clamp(0, 1)).round();
-    final smooth = d.length <= _kSmoothMax;
+    final smooth = this.smooth && d.length <= _kSmoothMax;
     final stroke = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2
+      ..strokeWidth = 1.6
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..color = color;
@@ -464,7 +472,7 @@ class LineChart extends CustomPainter {
               end: Alignment.bottomCenter,
               colors: [
                 color.withValues(alpha: .24),
-                color.withValues(alpha: 0)
+                color.withValues(alpha: 0),
               ],
             ).createShader(Offset.zero & s),
         );
@@ -494,8 +502,12 @@ class LineChart extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant LineChart o) =>
-      o.d != d || o.t != t || o.color != color || o.axis != axis ||
-      o.fill != fill || o.selectedX != selectedX;
+      o.d != d ||
+      o.t != t ||
+      o.color != color ||
+      o.axis != axis ||
+      o.fill != fill || o.smooth != smooth ||
+      o.selectedX != selectedX;
 }
 
 /// Discrete buckets — days of a week, minutes in a zone.
@@ -524,8 +536,14 @@ class Bars extends CustomPainter {
   /// colour. Not reached at phone width for 90 days.
   final Color Function(double v)? colorOf;
 
-  Bars(this.d, this.color,
-      {this.highlight = -1, this.t = 1, this.axis, this.colorOf});
+  Bars(
+    this.d,
+    this.color, {
+    this.highlight = -1,
+    this.t = 1,
+    this.axis,
+    this.colorOf,
+  });
 
   /// [maxColumns] over a series with holes: a column of nothing stays nothing.
   static List<double?> _columns(List<double?> d, int cols) {
@@ -570,7 +588,8 @@ class Bars extends CustomPainter {
     for (var i = 0; i < v.length; i++) {
       final value = v[i];
       if (value == null || !value.isFinite) continue;
-      final h = (a == null ? value / mx : a.t(value)) * s.height * t.clamp(0, 1);
+      final h =
+          (a == null ? value / mx : a.t(value)) * s.height * t.clamp(0, 1);
       if (!h.isFinite) continue;
       // A 2pt floor so a near-zero bar is still visible — grown DOWN from its
       // own top, or the bar hangs below the canvas floor and a zero and a
@@ -579,7 +598,7 @@ class Bars extends CustomPainter {
       cv.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromLTWH(i * bw + bw * .2, s.height - bh, bw * .6, bh),
-          const Radius.circular(3),
+          const Radius.circular(1),
         ),
         Paint()
           ..color = (hl < 0 || i == hl)
@@ -611,8 +630,14 @@ class Ring extends CustomPainter {
   /// calibrating" and "this is missing" into one look.
   final bool solid;
 
-  Ring(this.v, this.color, this.track,
-      {this.stroke = 10, this.t = 1, this.solid = false});
+  Ring(
+    this.v,
+    this.color,
+    this.track, {
+    this.stroke = 10,
+    this.t = 1,
+    this.solid = false,
+  });
 
   @override
   void paint(Canvas cv, Size s) {
@@ -652,7 +677,12 @@ class Ring extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant Ring o) =>
-      o.v != v || o.t != t || o.solid != solid || o.color != color;
+      o.v != v ||
+      o.t != t ||
+      o.solid != solid ||
+      o.color != color ||
+      o.track != track ||
+      o.stroke != stroke;
 }
 
 /// A ring made of discrete dashes rather than a continuous arc — for a value
@@ -665,8 +695,13 @@ class DashedRing extends CustomPainter {
   final double stroke;
   final int segments;
 
-  DashedRing(this.v, this.color, this.track,
-      {this.stroke = 10, this.segments = 24});
+  DashedRing(
+    this.v,
+    this.color,
+    this.track, {
+    this.stroke = 10,
+    this.segments = 24,
+  });
 
   @override
   void paint(Canvas cv, Size s) {
@@ -748,11 +783,11 @@ extension SleepStageX on SleepStage {
   /// The name printed beside the lane and in any key, in the reader's
   /// language. English only as the fallback for a tree with no localizations.
   String label([AppLocalizations? l]) => switch (this) {
-        SleepStage.awake => l?.sleepDetailStageAwake ?? 'Awake',
-        SleepStage.rem => l?.sleepDetailStageRem ?? 'REM',
-        SleepStage.light => l?.sleepDetailLight ?? 'Light',
-        SleepStage.deep => l?.sleepDetailDeep ?? 'Deep',
-      };
+    SleepStage.awake => l?.sleepDetailStageAwake ?? 'Awake',
+    SleepStage.rem => l?.sleepDetailStageRem ?? 'REM',
+    SleepStage.light => l?.sleepDetailLight ?? 'Light',
+    SleepStage.deep => l?.sleepDetailDeep ?? 'Deep',
+  };
 }
 
 /// Hypnogram — conventional lanes, minimum 2pt wide so a 30 s arousal in an
@@ -774,10 +809,10 @@ class Hypnogram extends CustomPainter {
   Hypnogram(this.stages, this.p, {this.t = 1});
 
   static const pigment = <SleepStage, Color>{
-    SleepStage.awake: C.orange,
-    SleepStage.rem: C.teal,
-    SleepStage.light: C.sky,
-    SleepStage.deep: C.blue,
+    SleepStage.awake: C.sleepAwake,
+    SleepStage.rem: C.sleepRem,
+    SleepStage.light: C.sleepLight,
+    SleepStage.deep: C.sleepDeep,
   };
 
   /// Contrast each lane is drawn at against the worst surface it can sit on,
@@ -792,14 +827,12 @@ class Hypnogram extends CustomPainter {
   /// darker until it hits its step on the ramp, so the four lanes differ by
   /// lightness as well as hue and by lane position on top of that.
   static Map<SleepStage, Color> cols(P p) => {
-        for (final s in SleepStage.values)
-          s: _shade(p, pigment[s]!,
-              (p.dark ? _darkTheme : _lightTheme)[s.index]),
-      };
+    for (final s in SleepStage.values)
+      s: _shade(p, pigment[s]!, (p.dark ? _darkTheme : _lightTheme)[s.index]),
+  };
 
-  static double _worst(P p, Color c) => [p.bg, p.card, p.card2]
-      .map((b) => P.contrast(c, b))
-      .reduce(min);
+  static double _worst(P p, Color c) =>
+      [p.bg, p.card, p.card2].map((b) => P.contrast(c, b)).reduce(min);
 
   /// [hue] moved toward the page ink, or back toward the surface, until it
   /// measures [target] against the worst surface. Bisection, like the solver
@@ -854,8 +887,11 @@ class Hypnogram extends CustomPainter {
     if (cols <= 0 || n <= cols) return st;
     return [
       for (var c = 0; c < cols; c++)
-        _dominant(st, (c * n / cols).floor(),
-            ((c + 1) * n / cols).ceil().clamp((c * n / cols).floor() + 1, n)),
+        _dominant(
+          st,
+          (c * n / cols).floor(),
+          ((c + 1) * n / cols).ceil().clamp((c * n / cols).floor() + 1, n),
+        ),
     ];
   }
 
@@ -942,8 +978,14 @@ class ZoneRows extends StatelessWidget {
   /// two-line rows would make every session in the list twice as tall.
   final bool compact;
 
-  const ZoneRows(this.minutes,
-      {super.key, this.lowerBpm, this.title, this.footnote, this.compact = false});
+  const ZoneRows(
+    this.minutes, {
+    super.key,
+    this.lowerBpm,
+    this.title,
+    this.footnote,
+    this.compact = false,
+  });
 
   static const pigment = [C.blueSoft, C.blue, C.green, C.orange, C.red];
 
@@ -973,59 +1015,104 @@ class ZoneRows extends StatelessWidget {
         if (title != null) ...[
           Semantics(
             header: true,
-            child: Text(title!,
-                style: F.cap.copyWith(color: p.ink, fontWeight: FontWeight.w600)),
+            child: Text(
+              title!,
+              style: F.cap.copyWith(color: p.ink, fontWeight: FontWeight.w600),
+            ),
           ),
           const SizedBox(height: S.x3),
         ],
-        for (var i = 0; i < 5 && i < minutes.length; i++)
+        for (final i in [
+          for (var j = 0; j < 5 && j < minutes.length; j++) j,
+        ].reversed)
           Padding(
-            padding: EdgeInsets.only(top: i == 0 ? 0 : (compact ? S.x1 : S.x3)),
-            child: MergeSemantics(
-              child: compact ? Row(children: [
-                Text(l?.activityLiveZoneLabel(i + 1) ?? 'Zone ${i + 1}',
-                    style: F.cap.copyWith(color: p.ink2)),
-                const SizedBox(width: S.x2),
-                Expanded(child: _bar(p, ink[i], top, minutes[i])),
-                const SizedBox(width: S.x2),
-                Text(
-                  l?.zoneRowsMinutes(_round(minutes[i])) ??
-                      '${_round(minutes[i])} min',
-                  style: F.cap.copyWith(color: p.ink),
-                ),
-              ]) : Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        child: Text.rich(
-                          TextSpan(children: [
-                            TextSpan(
-                                text: l?.activityLiveZoneLabel(i + 1) ??
-                                    'Zone ${i + 1}',
-                                style: F.cap.copyWith(
-                                    color: p.ink, fontWeight: FontWeight.w600)),
-                            if (range(lowerBpm, i, l) case final r?)
-                              TextSpan(
-                                  text: '  $r',
-                                  style: F.cap.copyWith(color: p.ink3)),
-                          ]),
-                        ),
+            padding: EdgeInsets.only(bottom: compact ? S.x1 : S.x2),
+            child: Container(
+              padding: compact ? EdgeInsets.zero : const EdgeInsets.all(S.x3),
+              decoration: compact
+                  ? null
+                  : BoxDecoration(color: p.card2, borderRadius: R.rSm),
+              child: MergeSemantics(
+                child: bigText(c) && !compact
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            l?.activityLiveZoneLabel(i + 1) ?? 'Zone ${i + 1}',
+                            style: F.section.copyWith(color: p.ink),
+                          ),
+                          if (range(lowerBpm, i, l) case final r?)
+                            Text(r, style: F.cap.copyWith(color: p.ink3)),
+                          const SizedBox(height: S.x1),
+                          Text(
+                            l?.zoneRowsMinutes(_round(minutes[i])) ??
+                                '${_round(minutes[i])} min',
+                            style: F.n24.copyWith(color: p.ink),
+                          ),
+                          const SizedBox(height: S.x2),
+                          _bar(p, ink[i], top, minutes[i]),
+                        ],
+                      )
+                    : compact
+                    ? Row(
+                        children: [
+                          Text(
+                            l?.activityLiveZoneLabel(i + 1) ?? 'Zone ${i + 1}',
+                            style: F.cap.copyWith(color: p.ink2),
+                          ),
+                          const SizedBox(width: S.x2),
+                          Expanded(child: _bar(p, ink[i], top, minutes[i])),
+                          const SizedBox(width: S.x2),
+                          Text(
+                            l?.zoneRowsMinutes(_round(minutes[i])) ??
+                                '${_round(minutes[i])} min',
+                            style: F.cap.copyWith(color: p.ink),
+                          ),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Expanded(
+                                child: Text.rich(
+                                  TextSpan(
+                                    children: [
+                                      TextSpan(
+                                        text:
+                                            l?.activityLiveZoneLabel(i + 1) ??
+                                            'Zone ${i + 1}',
+                                        style: F.section.copyWith(
+                                          color: p.ink,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (range(lowerBpm, i, l) case final r?)
+                                        TextSpan(
+                                          text: '  $r',
+                                          style: F.cap.copyWith(color: p.ink3),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: S.x2),
+                              Text(
+                                l?.zoneRowsMinutes(_round(minutes[i])) ??
+                                    '${_round(minutes[i])} min',
+                                style: F.n24.copyWith(
+                                  color: p.ink,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: S.x2),
+                          _bar(p, ink[i], top, minutes[i]),
+                        ],
                       ),
-                      const SizedBox(width: S.x2),
-                      Text(
-                        l?.zoneRowsMinutes(_round(minutes[i])) ??
-                            '${_round(minutes[i])} min',
-                        style: F.cap.copyWith(
-                            color: p.ink, fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: S.x1),
-                  _bar(p, ink[i], top, minutes[i]),
-                ],
               ),
             ),
           ),
@@ -1041,18 +1128,18 @@ class ZoneRows extends StatelessWidget {
 
   /// A bar as long as this zone's share of the longest one.
   static Widget _bar(P p, Color ink, double top, double v) => ExcludeSemantics(
+    child: Container(
+      height: 5,
+      decoration: BoxDecoration(color: p.track, borderRadius: R.rSm),
+      alignment: AlignmentDirectional.centerStart,
+      child: FractionallySizedBox(
+        widthFactor: top <= 0 || !v.isFinite ? 0 : (v / top).clamp(0.0, 1.0),
         child: Container(
-          height: 8,
-          decoration: BoxDecoration(color: p.track, borderRadius: R.rSm),
-          alignment: AlignmentDirectional.centerStart,
-          child: FractionallySizedBox(
-            widthFactor: top <= 0 || !v.isFinite ? 0 : (v / top).clamp(0.0, 1.0),
-            child: Container(
-              decoration: BoxDecoration(color: ink, borderRadius: R.rSm),
-            ),
-          ),
+          decoration: BoxDecoration(color: ink, borderRadius: R.rSm),
         ),
-      );
+      ),
+    ),
+  );
 }
 
 /// Actogram — hour of day (rows) × date (columns). The circadian view.
@@ -1133,12 +1220,13 @@ class HeatMap extends CustomPainter {
           ),
           empty
               ? (Paint()
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = 1
-                ..color = track)
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 1
+                  ..color = track)
               : (Paint()
-                ..color =
-                    color.withValues(alpha: .3 + v.clamp(0.0, 1.0) * .62)),
+                  ..color = color.withValues(
+                    alpha: .3 + v.clamp(0.0, 1.0) * .62,
+                  )),
         );
       }
     }
@@ -1264,8 +1352,13 @@ class NightStack extends CustomPainter {
   final double? selectedX;
   final Color? cursor;
 
-  NightStack(this.series, this.colors,
-      {this.axes, this.selectedX, this.cursor});
+  NightStack(
+    this.series,
+    this.colors, {
+    this.axes,
+    this.selectedX,
+    this.cursor,
+  });
 
   @override
   void paint(Canvas cv, Size s) {
@@ -1384,15 +1477,16 @@ class DayLanes extends CustomPainter {
       // Same aggregation the bar chart uses: a column of nothing stays
       // nothing, and a column of zeroes stays a zero.
       final v = Bars._columns(
-          movement, (s.width / 2.5).floor().clamp(1, movement.length));
+        movement,
+        (s.width / 2.5).floor().clamp(1, movement.length),
+      );
       final cw = s.width / v.length;
       final ink = p.on(C.domMove);
       final watched = Paint()..color = ink.withValues(alpha: .40);
       for (var i = 0; i < v.length; i++) {
         final m = v[i];
         if (m == null || !m.isFinite) continue;
-        cv.drawRect(
-            Rect.fromLTWH(i * cw, s.height - 1, cw + .5, 1), watched);
+        cv.drawRect(Rect.fromLTWH(i * cw, s.height - 1, cw + .5, 1), watched);
         final h = m.clamp(0.0, 1.0) * _strip;
         if (h <= 0) continue;
         cv.drawRect(

@@ -11,6 +11,14 @@ local midnight to local midnight). The same drift applies to §2's table and
 every line-number citation in §3 below — line numbers move on every edit,
 symbol names don't; verify against the source, not this doc.
 
+## Local simulator preference
+
+Always use an **iPhone 15 Pro** simulator for this project: builds, launches,
+debugging, UI checks, and screenshots, unless the user explicitly requests another
+model. Reuse an existing iPhone 15 Pro simulator; if none exists, create one with
+an installed compatible iOS runtime. Select it explicitly instead of using another
+model just because it is already booted.
+
 ## 1. What this is
 
 A Flutter health app for wearables (WHOOP 4.0/5.0/MG supported today). **Fully on-device,

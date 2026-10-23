@@ -50,7 +50,7 @@ import 'picker.dart';
 // stats with the same widget and split its values with the same function.
 // poster.dart imports this file back for [ActivityResult]; that is the seam,
 // not a layering mistake.
-import 'poster.dart' show PosterStatRow, posterStatIcon, splitStatUnit;
+import 'poster.dart' show posterStatIcon, splitStatUnit;
 import 'share.dart';
 
 /// The defining visual object of an activity. Everything else supports it.
@@ -665,40 +665,89 @@ String? _heroStatName(ActivityResult r) => switch (r.arch) {
       Arch.interval || Arch.flow || Arch.match || Arch.basic => 'Time',
     };
 
-/// A finished session's supporting stats, one to a row.
+/// The recorded session metrics in compact two-column tiles.
 ///
-/// The three-across strip this replaces set three bare numbers side by side
-/// with a caption under each. The value column was a third of a card, so
-/// '5:08 /mi' had to hide its unit inside the label, and the fourth stat was
-/// dropped without saying so. One row per stat gives every one of them the
-/// same ringed mark, the same caps name, and the same value/unit pair the
-/// share card sets — [PosterStatRow], not a second row that agrees with it
-/// until somebody edits one of them.
+/// Every recorded stat is kept. Large text uses one column so values and units
+/// can reflow, and [sessionStats] still omits measurements that never arrived.
 class SessionStats extends StatelessWidget {
   final ActivityResult r;
-  const SessionStats(this.r, {super.key});
+  final bool showStrain;
+  const SessionStats(this.r, {super.key, this.showStrain = true});
 
   @override
   Widget build(BuildContext c) {
     final p = P.of(c);
-    // Solved against the page, not raw pigment: the poster paints its rings on
-    // one dark card it controls, and this one lands on both themes.
-    final accent = p.on(r.activity.color);
-    final rows = <Widget>[];
-    for (final s in sessionStats(r, unitsOf(c))) {
-      if (rows.isNotEmpty) rows.add(Divider(color: p.line, height: S.x5));
-      final (value, unit) = splitStatUnit(s.$2);
-      rows.add(
-        PosterStatRow(
-          icon: statIcon(s.$1),
-          label: uiText(c, s.$1),
-          value: value,
-          unit: unit == null ? null : uiText(c, unit),
-          accent: accent,
-        ),
-      );
-    }
-    return Surface(child: Column(children: rows));
+    final stats = sessionStats(
+      r,
+      unitsOf(c),
+    ).where((s) => showStrain || s.$1 != 'Strain').toList();
+    if (stats.isEmpty) return const SizedBox.shrink();
+    return LayoutBuilder(
+      builder: (c, bounds) {
+        final columns = MediaQuery.textScalerOf(c).scale(1) > 1.5 ? 1 : 2;
+        final width = (bounds.maxWidth - S.x2 * (columns - 1)) / columns;
+        return Wrap(
+          spacing: S.x2,
+          runSpacing: S.x2,
+          children: [
+            for (final s in stats)
+              SizedBox(
+                width: width,
+                child: Surface(
+                  color: p.card2,
+                  pad: const EdgeInsets.all(S.x4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(statIcon(s.$1), size: 16, color: p.ink3),
+                          const SizedBox(width: S.x2),
+                          Expanded(
+                            child: Text(
+                              uiText(c, s.$1).toUpperCase(),
+                              style: F.over.copyWith(color: p.ink2),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: S.x5),
+                      Builder(
+                        builder: (c) {
+                          final (value, unit) = splitStatUnit(s.$2);
+                          return Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.end,
+                            spacing: S.x1,
+                            runSpacing: S.x1,
+                            children: [
+                              Text(
+                                value,
+                                style: F.n34.copyWith(
+                                  color: s.$1 == 'Strain'
+                                      ? p.on(C.domMove)
+                                      : p.ink,
+                                ),
+                              ),
+                              if (unit != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: S.x1),
+                                  child: Text(
+                                    uiText(c, unit),
+                                    style: F.cap.copyWith(color: p.ink2),
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -721,11 +770,15 @@ class ActivitySummary extends StatefulWidget {
   /// escalation the spec refuses.
   final bool justFinished;
 
+  /// Preview a sample session without editing or exporting it as real data.
+  final bool readOnly;
+
   const ActivitySummary(this.result,
       {super.key,
       this.weightKg,
       this.onRetrySave,
-      this.justFinished = false});
+      this.justFinished = false,
+    this.readOnly = false}) : assert(!readOnly || onRetrySave == null);
 
   @override
   State<ActivitySummary> createState() => _ActivitySummaryState();
@@ -812,6 +865,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
   bool _rpeDismissed = false;
 
   bool get _askRpe =>
+      !widget.readOnly &&
       widget.justFinished &&
       r.sessionId != null &&
       r.rpe == null &&
@@ -881,10 +935,13 @@ class _ActivitySummaryState extends State<ActivitySummary> {
           ]),
         ],
         const SizedBox(height: S.x3),
-        Row(children: [
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          spacing: S.x4,
+          runSpacing: S.x2,
+          children: [
           Text(l?.activitySummaryRpeVeryEasy ?? '1 · very easy',
               style: F.over.copyWith(color: p.ink3)),
-          const Spacer(),
           Text(l?.activitySummaryRpeMaximal ?? '10 · maximal',
               style: F.over.copyWith(color: p.ink3)),
         ]),
@@ -1013,7 +1070,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
     // the write threw has nowhere to put it. Reserving the two-icon width
     // for a row that only ever draws one icon would shove the title left on
     // every unsaved-session summary for no reason.
-    final canChangeType = r.sessionId != null;
+    final canChangeType = !widget.readOnly && r.sessionId != null;
     // GPX export only makes sense for a session with an actual recorded
     // route — offering it on a lift or a match would be a button that can
     // only ever fail. Gated on `geo` (raw lat/lng), not the normalised
@@ -1021,7 +1078,8 @@ class _ActivitySummaryState extends State<ActivitySummary> {
     // zero-span route (every fix at the same spot — a stationary GPS lock),
     // which would hide the export for a session `getWorkoutRoute` can still
     // export.
-    final canExportGpx = r.sessionId != null &&
+    final canExportGpx =
+        !widget.readOnly && r.sessionId != null &&
         (arch == Arch.route || arch == Arch.journey) &&
         r.geo.length >= 2;
     final l = AppLocalizations.of(c);
@@ -1034,7 +1092,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: S.x4),
               child: NavBar(
-                a.displayName(c),
+                a.displayName(c).toUpperCase(),
                 sub: '${displayDate(c, r.start)} · ${formatClockOf(r.start)}'
                     .toUpperCase(),
                 // Each icon is a Pressable with S.tap's own 44 pt minimum hit
@@ -1044,7 +1102,8 @@ class _ActivitySummaryState extends State<ActivitySummary> {
               trailingWidth: iconCount == 1
                   ? S.tap
                   : S.tap * iconCount + S.x3 * (iconCount - 1),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              trailing: widget.readOnly
+                    ? null: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (canChangeType) ...[
                   Pressable(
                     semanticLabel:
@@ -1105,7 +1164,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
                 ],
                 tab,
                 (i) => setState(() => tab = i),
-                color: a.color),
+                color: C.domMove),
           ),
           Expanded(
             child: ListView(
@@ -1158,7 +1217,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
                 textBaseline: TextBaseline.alphabetic,
                 children: [
                   Text(hero.$1,
-                      style: F.n48.copyWith(color: p.ink), maxLines: 1),
+                      style: F.n64.copyWith(color: p.ink), maxLines: 1),
                   if (hero.$2.isNotEmpty) ...[
                     const SizedBox(width: S.x2),
                     Text(hero.$2, style: F.body.copyWith(color: p.ink3)),
@@ -1166,6 +1225,24 @@ class _ActivitySummaryState extends State<ActivitySummary> {
                 ]),
           ),
         ),
+          if (r.strain != null) ...[
+            const SizedBox(width: S.x5),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(r.strain!.toStringAsFixed(1),
+                        style: F.n64.copyWith(color: p.on(C.domMove))),
+                    const SizedBox(height: S.x1),
+                    Text((l?.activityLiveStrainUnit ?? 'strain').toUpperCase(),
+                        style: F.over.copyWith(color: p.ink3)),
+                  ],
+                ),
+              ),
+            ),
+          ],
         if (r.private) ...[
           const SizedBox(width: S.x3),
           Pill(l?.activitySummaryPrivate ?? 'Private', C.n500,
@@ -1177,7 +1254,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
       const SizedBox(height: S.x5),
       ..._definingObject(c, p),
       const SizedBox(height: S.x5),
-      SessionStats(r),
+      SessionStats(r, showStrain: false),
       // TS-09 — directly under the measurements, because that is what it is
       // being asked against, and directly where the answer lands: once rated,
       // this card is gone and 'Your rating' is the last row of the card above.
@@ -1543,7 +1620,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
                 series: r.elevationM,
                 child: CustomPaint(
                     size: Size.infinite,
-                    painter: Elevation(r.elevationM, p.on(C.green),
+                    painter: Elevation(r.elevationM, p.on(C.sleep),
                         markerInk: p.card, axis: axis)),
               ),
               const SizedBox(height: S.x4),
@@ -1731,8 +1808,8 @@ class _ActivitySummaryState extends State<ActivitySummary> {
       series: r.hr,
       child: CustomPaint(
           size: Size.infinite,
-          painter: LineChart(r.hr, p.on(C.red),
-              axis: axis, t: animate(context, 1))),
+          painter: LineChart(r.hr, p.on(C.strain),
+              smooth: false, axis: axis, t: animate(context, 1))),
     );
   }
 
@@ -1757,50 +1834,45 @@ class _ActivitySummaryState extends State<ActivitySummary> {
             Section(
               l?.activitySummaryTopSet ?? 'Top set',
               Surface(
-                child: Row(children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                        color: p.wash(C.yellow), borderRadius: R.rMd),
-                    child: Icon(LucideIcons.trophy,
-                        size: 19, color: p.on(C.yellow)),
-                  ),
-                  const SizedBox(width: S.x3),
-                  Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                              exerciseByKey(top.exerciseKey)?.labelFor(
-                                      Localizations.localeOf(c).languageCode) ??
-                                  top.exerciseKey,
-                              style: F.body.copyWith(
-                                  color: p.ink, fontWeight: FontWeight.w600)),
-                          Row(children: [
-                            Flexible(
-                                child: Text(
-                                    _u?.isImperial == true
-                                        ? '1RM estimate '
-                                            '${_u!.weightValue(rm!).round()} lb'
-                                        : (l?.activitySummaryOneRepMax(
-                                                rm!.round()) ??
-                                            '1RM estimate ${rm!.round()} kg'),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: F.over.copyWith(color: p.ink3))),
-                          ]),
-                        ]),
-                  ),
-                    const SizedBox(width: S.x2),
-                    // The row rule: the name gives way, the measurement keeps
-                    // its natural width and sits flush at the card edge.
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Icon(LucideIcons.trophy, size: 18,
+                          color: p.on(C.yellow)),
+                      const SizedBox(width: S.x2),
+                      Expanded(
+                        child: Text(
+                          exerciseByKey(top.exerciseKey)?.labelFor(
+                                  Localizations.localeOf(c).languageCode) ??
+                              top.exerciseKey,
+                          style: F.body.copyWith(color: p.ink,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(height: S.x4),
+                    Wrap(
+                      spacing: S.x2,
+                      runSpacing: S.x2,
+                      crossAxisAlignment: WrapCrossAlignment.end,
+                      children: [
+                        Text(_kg(c, top.loadKg!),
+                            style: F.n34.copyWith(color: p.ink)),
+                        Text('× ${top.reps}',
+                            style: F.n24.copyWith(color: p.ink2)),
+                      ],
+                    ),
+                    const SizedBox(height: S.x3),
                     Text(
-                      '${_kg(c, top.loadKg!)} × ${top.reps}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: F.n17.copyWith(color: p.ink)),
-                ]),
+                      _u?.isImperial == true
+                          ? '1RM estimate ${_u!.weightValue(rm!).round()} lb'
+                          : (l?.activitySummaryOneRepMax(rm!.round()) ??
+                              '1RM estimate ${rm!.round()} kg'),
+                      style: F.over.copyWith(color: p.ink3),
+                    ),
+                  ],
+                ),
               ),
             ),
           if (r.strength.hasUnloadedSets)
@@ -2184,9 +2256,9 @@ class _ActivitySummaryState extends State<ActivitySummary> {
   List<Widget> _graphs(BuildContext c, P p) {
     final l = AppLocalizations.of(c);
     final series = <(String, String, Color, List<double?>)>[
-      if (r.hr.length > 1) ('Heart rate', 'bpm', C.red, r.hr),
+      if (r.hr.length > 1) ('Heart rate', 'bpm', C.strain, r.hr),
       if (r.elevationM.length > 1)
-        ('Elevation', 'm', C.teal, r.elevationM),
+        ('Elevation', 'm', C.sleep, r.elevationM),
     ];
     if (series.isEmpty) {
       // Same distinction the overview draws: a session with one minute in it
@@ -2243,6 +2315,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
                 child: CustomPaint(
                     size: Size.infinite,
                     painter: LineChart(g.$4, p.on(g.$3),
+                        smooth: g.$1 != 'Heart rate',
                         axis: axis, t: animate(context, 1))),
               );
             }),
